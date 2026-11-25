@@ -1,21 +1,23 @@
 {
-  "name": "@local/dsh-remote-gpu",
-  "version": "1.0.0",
+  "name": "dsh-remote-gpu-switch",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "Shows how many GPUs on the dsh-remote host are free, with per-GPU utilization, memory, temperature and the owning user.",
+  "description": "Shows the free GPUs of the current workspace's machine — local or dsh-remote host — with per-GPU utilization, memory, temperature and the owning user.",
   "keywords": [
     "dsh-plugin",
     "dsh",
     "gpu",
     "nvidia",
+    "local",
     "remote",
+    "workspace",
     "monitoring"
   ],
-  "homepage": "https://github.com/NNNNyang/dsh-remote-gpu",
+  "homepage": "https://github.com/Yezery/dsh-remote-gpu-switch",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NNNNyang/dsh-remote-gpu.git"
+    "url": "git+https://github.com/Yezery/dsh-remote-gpu-switch.git"
   },
   "exports": {
     ".": "./index.js",
@@ -43,5 +45,8 @@
         "@deepseek-ai/dsh-client-locale"
       ]
     }
+  },
+  "scripts": {
+    "test": "node tools/test-parse.mjs && node tools/test-targets.mjs && node tools/test-host.mjs && sh tools/check-command.sh"
   }
 }

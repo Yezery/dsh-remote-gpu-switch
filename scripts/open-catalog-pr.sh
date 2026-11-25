@@ -7,12 +7,12 @@
 #   sh scripts/open-catalog-pr.sh [fork-owner]
 set -eu
 
-owner="${1:-NNNNyang}"
+owner="${1:-Yezery}"
 upstream="awesome-dsh-plugin/awesome-dsh-plugin"
 root=$(cd "$(dirname "$0")/.." && pwd)
-entry="$root/market-entry/NNNNyang__dsh-remote-gpu.yml"
-target="data/plugins/NNNNyang__dsh-remote-gpu.yml"
-branch="add-dsh-remote-gpu"
+entry="$root/market-entry/Yezery__dsh-remote-gpu-switch.yml"
+target="data/plugins/Yezery__dsh-remote-gpu-switch.yml"
+branch="add-dsh-remote-gpu-switch"
 work="${TMPDIR:-/tmp}/awesome-dsh-plugin-$owner"
 
 [ -f "$entry" ] || { echo "missing entry file: $entry" >&2; exit 1; }
@@ -30,7 +30,7 @@ git add "$target"
 if git diff --cached --quiet; then
   echo "→ nothing to commit: $target is already on your fork"
 else
-  git commit -m "Add NNNNyang/dsh-remote-gpu (remote GPU monitor)"
+  git commit -m "Add Yezery/dsh-remote-gpu-switch (workspace GPU monitor)"
 fi
 
 git push -u origin "$branch" --force-with-lease

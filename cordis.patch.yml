@@ -1,21 +1,23 @@
-# Bundle patch: insert the dsh-remote-gpu plugin row.
+# Bundle patch: insert the dsh-remote-gpu-switch plugin row.
 #
 # `config` reaches the host plugin's apply(ctx, config) verbatim, so these are
 # the plugin's tunables. A user patch layer can override them by id:
 #
-#   - id: dsh-remote-gpu
+#   - id: dsh-remote-gpu-switch
 #     config:
 #       intervalMs: 5000
 #
 - insert:
-    - id: dsh-remote-gpu
-      name: '@local/dsh-remote-gpu'
+    - id: dsh-remote-gpu-switch
+      name: dsh-remote-gpu-switch
       config:
-        # How often the host re-probes the remote GPU (ms).
+        # How often the host re-probes the current workspace's GPU (ms).
         intervalMs: 3000
-        # Upper bound for one remote probe (ms).
+        # Upper bound for one probe, local or remote (ms).
         commandTimeoutMs: 15000
         # Stop probing this long after the last client asked (ms); 0 keeps polling.
         idleStopMs: 120000
         # How many samples the client-side sparkline keeps.
         historyLength: 90
+        # command: '…'       # override the REMOTE probe command
+        # localCommand: '…'  # override the LOCAL probe command

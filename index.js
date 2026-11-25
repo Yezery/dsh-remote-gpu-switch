@@ -1,22 +1,34 @@
-// dsh-remote-gpu — host half.
+// dsh-remote-gpu-switch — host half.
 //
-// Reports live GPU utilization of the server dsh-remote is connected to.
+// Reports live GPU utilization of the machine the current workspace belongs to:
+// a LOCAL workspace probes this host directly, a REMOTE workspace keeps using
+// dsh-remote's own `rw_exec` tool against the host recorded in that workspace's
+// mirror. The probe is therefore always the machine the user is working on,
+// and switching workspaces switches machines.
 //
-// The probe runs through dsh-remote's own `rw_exec` tool, so this plugin never
-// opens a second SSH connection and never touches credentials, keychains or
-// host keys — dsh-remote already owns that surface. The host keeps the last
-// sample, refreshes it on a timer while a client is watching, and serves it as
+// Remote probes run through dsh-remote's `rw_exec` on behalf of the calling
+// session's agent, so dsh-remote resolves the same mirror-bound host as the
+// session's own tools: no second SSH connection, no credentials, no active
+// machine fallback. The host keeps one sample per machine (local / each remote
+// origin), refreshes it on a timer while a client watches, and serves it as
 // JSON over the plugin's own HTTP route.
 
+import { execFile } from 'node:child_process'
 import { registerHttpTransports } from './lib/http-transport.js'
 import { parseGpuOutput, toWireGpu } from './lib/gpu-parse.js'
+import {
+  findMirrorForCwd,
+  machineKey,
+  remoteWorkspacesRoot,
+  targetKeyForMirror,
+} from './lib/workspace-target.js'
 
-export const name = 'dsh-remote-gpu'
+export const name = 'dsh-remote-gpu-switch'
 export const inject = ['tools']
 
 /**
  * One POSIX shell line, tolerant of missing tools:
- *   ==DSHGPU host==    → remote hostname
+ *   ==DSHGPU host==    → hostname
  *   ==DSHGPU backend== → nvidia-smi | rocm-smi | gpustat | none
  *   ==DSHGPU gpus==    → backend-specific payload
  *   ==DSHGPU temp==    → optional per-GPU temperature (NVIDIA only)
@@ -24,7 +36,8 @@ export const inject = ['tools']
  *   ==DSHGPU procs==   → pid,gpu_uuid,used_memory of the compute apps (NVIDIA only)
  *   ==DSHGPU ps==      → pid,user,command of those processes (NVIDIA only)
  * Each fragment ends with `;` so the fragments join with a plain space: a `;`
- * right after `then`/`else` would not parse.
+ * right after `then`/`else` would not parse. The same script runs on the local
+ * host through `sh -c` and on remote hosts through dsh-remote.
  */
 const DEFAULT_COMMAND = [
   "echo '==DSHGPU host==';",
@@ -91,6 +104,7 @@ function resolveSettings(config) {
     if (!Number.isFinite(parsed)) return fallback
     return Math.min(max, Math.max(min, parsed))
   }
+  const custom = (value) => typeof value === 'string' && value.trim() !== ''
   return {
     intervalMs: number(raw.intervalMs, DEFAULTS.intervalMs, 500, 300000),
     commandTimeoutMs: number(raw.commandTimeoutMs, DEFAULTS.commandTimeoutMs, 1000, 300000),
@@ -98,7 +112,9 @@ function resolveSettings(config) {
     historyLength: number(raw.historyLength, DEFAULTS.historyLength, 10, 600),
     idleUtilPercent: number(raw.idleUtilPercent, DEFAULTS.idleUtilPercent, 0, 100),
     idleMemoryPercent: number(raw.idleMemoryPercent, DEFAULTS.idleMemoryPercent, 0, 100),
-    command: typeof raw.command === 'string' && raw.command.trim() !== '' ? raw.command : DEFAULT_COMMAND,
+    command: custom(raw.command) ? raw.command : DEFAULT_COMMAND,
+    // Remote-only overrides must not leak into the local probe (and vice versa).
+    localCommand: custom(raw.localCommand) ? raw.localCommand : DEFAULT_COMMAND,
   }
 }
 
@@ -127,12 +143,56 @@ function describeFailure(message) {
     }
   }
   if (/this session is LOCAL/i.test(text)) {
-    return { message: text, hint: 'The probe targets the active dsh-remote machine.' }
+    return { message: text, hint: 'The probe targets the machine of the current workspace.' }
   }
   if (/timed out/i.test(text)) {
     return { message: text, hint: 'The remote probe timed out; raise commandTimeoutMs if needed.' }
   }
+  if (/not live|no session context/i.test(text)) {
+    return {
+      message: 'The current workspace is not attached to a live session.',
+      hint: 'Reopen the workspace session and try again.',
+    }
+  }
   return { message: text, hint: null }
+}
+
+/**
+ * Run the probe script on this machine (a LOCAL workspace).
+ * @param {string} command - POSIX shell script.
+ * @param {number} timeoutMs - hard timeout.
+ * @returns {Promise<string>} script stdout.
+ */
+function runLocalProbe(command, timeoutMs) {
+  // On Windows the script uses POSIX shell syntax; Git Bash's `sh` is the
+  // only runner that understands it. Without it, report a real error rather
+  // than pretending the machine has no GPU.
+  const shell = process.platform === 'win32' ? 'sh' : '/bin/sh'
+  // A GUI/daemon process often lacks the interactive shell's PATH; GPU tools
+  // commonly live in /usr/local/bin or Homebrew's prefix.
+  const pathEnv = process.platform === 'win32'
+    ? (process.env.PATH || process.env.Path || '')
+    : ['/usr/local/bin', '/opt/homebrew/bin', process.env.PATH || ''].join(':')
+  return new Promise((resolve, reject) => {
+    execFile(shell, ['-c', command], {
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, PATH: pathEnv, LC_ALL: 'C' },
+    }, (error, stdout, stderr) => {
+      // A non-zero exit still yields a usable marked payload (e.g. a backend
+      // that reports a driver error); only a spawn failure with no output is
+      // a real local-probe failure.
+      if (error && !String(stdout || '').trim()) {
+        const detail = String(stderr || '').trim() || error.message
+        reject(new Error(error.code === 'ENOENT'
+          ? `local shell not available: ${shell}`
+          : detail))
+        return
+      }
+      resolve(String(stdout || ''))
+    })
+  })
 }
 
 /**
@@ -159,13 +219,17 @@ function summarizeUsers(gpus) {
  * @param {object} snapshot - the served snapshot.
  */
 function formatSnapshot(snapshot) {
+  const target = snapshot.target || {}
+  const where = target.kind === 'local'
+    ? `Local host ${snapshot.host || 'unknown'}`
+    : `Remote host ${target.address || snapshot.host || 'unknown'}`
   if (snapshot.status === 'error') {
     const hint = snapshot.hint ? `\n${snapshot.hint}` : ''
-    return `Remote GPU probe failed: ${snapshot.error}${hint}`
+    return `${where}: GPU probe failed: ${snapshot.error}${hint}`
   }
-  if (snapshot.status !== 'ok') return 'Remote GPU probe has not produced a sample yet.'
-  if (!snapshot.gpus.length) return `Remote host ${snapshot.host || 'unknown'}: no GPU visible (${snapshot.backend}).`
-  const lines = [`Remote host ${snapshot.host || 'unknown'} — ${snapshot.backend}`]
+  if (snapshot.status !== 'ok') return `${where}: GPU probe has not produced a sample yet.`
+  if (!snapshot.gpus.length) return `${where}: no GPU visible (${snapshot.backend}).`
+  const lines = [`${where} — ${snapshot.backend}`]
   if (snapshot.idle) {
     lines.push(`Idle GPUs: ${snapshot.idle.count}/${snapshot.idle.total} (util < ${snapshot.idle.utilPercent}%, memory < ${snapshot.idle.memoryPercent}%)`)
   }
@@ -197,188 +261,353 @@ function formatSnapshot(snapshot) {
 export function apply(ctx, config) {
   const settings = resolveSettings(config)
 
-  const state = {
-    status: 'idle',
-    host: '',
-    backend: 'none',
-    gpus: [],
-    error: null,
-    hint: null,
-    updatedAt: 0,
-    // How often a client asked for the snapshot — proof that the UI is wired.
-    requests: 0,
-  }
-  const history = []
-  let timer = null
-  let inFlight = null
-  let lastRequestAt = 0
+  /** One sample holder per machine (`local`, `remote:user@host:port`) or the legacy active machine. */
+  const contexts = new Map()
+  let lastContext = null
+  let legacyContext = null
   let callSeq = 0
   // The tool registry fuses the caller signal with the wrapper signal and reads
   // `signal.aborted` unguarded, so every execution needs a real AbortSignal.
   // One controller per plugin lifetime also cancels a running probe on unload.
   const abort = new AbortController()
 
-  ctx.effect(() => () => {
-    if (timer !== null) {
-      clearInterval(timer)
-      timer = null
+  /**
+   * A fresh sample holder.
+   * @param {string} key - context key.
+   */
+  function createContext(key) {
+    return {
+      key,
+      target: null,
+      status: 'idle',
+      host: '',
+      backend: 'none',
+      gpus: [],
+      error: null,
+      hint: null,
+      updatedAt: 0,
+      // How often a client asked for this machine — proof that the UI is wired.
+      requests: 0,
+      history: [],
+      lastRequestAt: 0,
+      timer: null,
+      inFlight: null,
     }
-    try { abort.abort() } catch { /* already aborted */ }
-  }, 'dsh-remote-gpu.timer')
+  }
 
   /**
-   * Run the remote probe through dsh-remote's rw_exec tool.
-   * @returns {Promise<void>}
+   * The holder for one machine, created on first request.
+   * @param {string} key - context key.
    */
-  async function probe() {
-    if (inFlight !== null) return inFlight
-    callSeq += 1
-    const callId = `dsh-remote-gpu-${Date.now().toString(36)}-${callSeq}`
-    inFlight = (async () => {
-      try {
-        // The tools service now takes a batch: `calls` with a JSON-string
-        // `arguments` per call, settling to `{ results: [{ callId, result }] }`
-        // where each result is the materialized tool result (content blocks).
-        // The previous single-call shape made `calls` undefined and the batch
-        // scheduler failed with "Tool batch execution failed".
-        const batch = await ctx.tools.execute({
-          calls: [
-            {
-              id: callId,
-              name: 'rw_exec',
-              arguments: JSON.stringify({
-                command: settings.command,
-                // `rw_exec` promotes a timed-out command to a background job by
-                // default, and that path calls `jobs.start({ owner: agent?.id })`.
-                // This probe has no agent, so the job registry refuses the owner and
-                // the whole call fails with "background jobs unavailable". A probe is
-                // a bounded foreground command, so opt out of promotion entirely.
-                promoteOnTimeout: false,
-                // Fail the call ourselves rather than inheriting a longer budget.
-                timeoutMs: Math.min(600000, Math.max(1000, settings.commandTimeoutMs)),
-              }),
-            },
-          ],
-          // Required by the registry: the batch scheduler reads `signal.aborted`.
-          signal: abort.signal,
-        })
-        const result = batch?.results?.[0]?.result
-        if (!result || result.isError) {
-          const caused = result?.error?.message
-            ?? batch?.results?.[0]?.result?.error?.message
-            ?? result?.content?.[0]?.text
-            ?? 'unknown error'
-          const failure = describeFailure(caused)
-          state.status = 'error'
-          state.error = failure.message
-          state.hint = failure.hint
-          state.updatedAt = Date.now()
-          return
-        }
-        const text = typeof result.content?.[0]?.text === 'string' ? result.content[0].text : ''
-        const parsed = parseGpuOutput(text)
-        state.status = 'ok'
-        state.host = parsed.host
-        state.backend = parsed.backend
-        state.gpus = parsed.gpus.map(toWireGpu)
-        state.error = parsed.error
-        state.hint = parsed.error === 'no-gpu-backend'
+  function contextFor(key) {
+    let context = contexts.get(key)
+    if (!context) {
+      context = createContext(key)
+      contexts.set(key, context)
+    }
+    return context
+  }
+
+  ctx.effect(() => () => {
+    for (const context of contexts.values()) {
+      if (context.timer !== null) {
+        clearInterval(context.timer)
+        context.timer = null
+      }
+    }
+    try { abort.abort() } catch { /* already aborted */ }
+  }, 'dsh-remote-gpu-switch.timer')
+
+  /**
+   * Resolve the machine the given session's workspace belongs to.
+   *
+   * No session id means "no workspace context": keep the original behaviour and
+   * target the active dsh-remote machine. A session whose cwd is inside a
+   * dsh-remote mirror is remote (bound to that mirror's host); any other cwd is
+   * a local workspace.
+   *
+   * @param {string} [sessionId] - the calling session.
+   * @returns {{key: string, kind: 'local'|'remote'|'legacy'|'unknown',
+   *   sessionId: string, cwd?: string, agent?: any, mirror?: object}}
+   */
+  function resolveTarget(sessionId) {
+    const id = String(sessionId || '').trim()
+    if (!id) return { key: 'legacy', kind: 'legacy', sessionId: '' }
+    const get = typeof ctx.get === 'function' ? (name) => ctx.get(name) : () => undefined
+    const agents = get('agents')
+    const agent = agents && typeof agents.get === 'function' ? agents.get(id) : undefined
+    const sessions = get('sessions')
+    let cwd = ''
+    try { cwd = String(agent?.session?.header?.cwd || '') } catch { cwd = '' }
+    if (!cwd && sessions && typeof sessions.get === 'function') {
+      try { cwd = String(sessions.get(id)?.header?.cwd || '') } catch { cwd = '' }
+    }
+    if (!cwd) return { key: `session:${id}`, kind: 'unknown', sessionId: id, agent }
+    const mirror = findMirrorForCwd(cwd, remoteWorkspacesRoot())
+    if (!mirror) return { key: 'local', kind: 'local', sessionId: id, cwd, agent }
+    return {
+      key: targetKeyForMirror(mirror),
+      kind: 'remote',
+      sessionId: id,
+      cwd,
+      agent,
+      mirror,
+    }
+  }
+
+  /**
+   * The target as the client renders it — host identity, not GPU identity.
+   * @param {object} target - from {@link resolveTarget}.
+   * @param {object} context - sample holder (for the probed hostname).
+   */
+  function publicTarget(target, context) {
+    if (target.kind === 'local') {
+      return { kind: 'local', label: 'local', hostname: context.host || '', cwd: target.cwd || '' }
+    }
+    if (target.kind === 'remote') {
+      const mirror = target.mirror || {}
+      return {
+        kind: 'remote',
+        label: mirror.alias || mirror.host || '',
+        address: machineKey(mirror),
+        host: mirror.host || '',
+        port: Number(mirror.port) || 22,
+        username: mirror.username || '',
+        hostname: context.host || '',
+      }
+    }
+    if (target.kind === 'unknown') return { kind: 'unknown', label: '', hostname: context.host || '' }
+    return { kind: 'remote', label: 'dsh-remote', address: context.host || '', hostname: context.host || '', legacy: true }
+  }
+
+  /**
+   * Merge a parsed probe into a context.
+   * @param {object} context - sample holder.
+   * @param {object} parsed - {@link parseGpuOutput} result.
+   * @param {object} target - from {@link resolveTarget}.
+   */
+  function applyParsed(context, parsed, target) {
+    context.status = 'ok'
+    context.host = parsed.host
+    context.backend = parsed.backend
+    context.gpus = parsed.gpus.map(toWireGpu)
+    context.error = parsed.error
+    const local = target.kind === 'local'
+    context.hint = local && parsed.error === 'no-gpu-backend'
+      ? 'No nvidia-smi / rocm-smi / gpustat was found on this machine.'
+      : local && parsed.error === 'no-gpu-visible'
+        ? (parsed.detail
+          ? `The local probe tool reported: ${parsed.detail}`
+          : 'The local probe tool exists but reports no visible GPU.')
+        : parsed.error === 'no-gpu-backend'
           ? 'Neither nvidia-smi, rocm-smi nor gpustat was found on the remote host.'
           : parsed.error === 'no-gpu-visible'
             ? (parsed.detail
               ? `The probe tool reported: ${parsed.detail}`
               : 'The probe tool exists but reports no visible GPU.')
             : null
-        state.updatedAt = Date.now()
-        pushHistory()
+    context.updatedAt = Date.now()
+    pushHistory(context)
+  }
+
+  /** Append one sample to a machine's sparkline history. */
+  function pushHistory(context) {
+    const utilization = context.gpus.reduce((max, gpu) => {
+      const value = gpu.utilization
+      return typeof value === 'number' && value > max ? value : max
+    }, 0)
+    context.history.push({ t: context.updatedAt, util: utilization })
+    while (context.history.length > settings.historyLength) context.history.shift()
+  }
+
+  /**
+   * Run the probe for one machine.
+   *
+   * Remote targets execute `rw_exec` as the calling session's own agent, which
+   * makes dsh-remote resolve the workspace's mirror-bound host instead of the
+   * mutable active machine. Local targets run the same script through `sh`.
+   *
+   * @param {object} context - sample holder.
+   * @param {object} target - from {@link resolveTarget}.
+   * @returns {Promise<void>}
+   */
+  function probe(context, target) {
+    if (context.inFlight !== null) return context.inFlight
+    context.target = target
+    context.inFlight = (async () => {
+      try {
+        let text = ''
+        if (target.kind === 'unknown') {
+          throw new Error('no session context — the workspace is not attached to a live session')
+        }
+        if (target.kind === 'local') {
+          text = await runLocalProbe(settings.localCommand, settings.commandTimeoutMs)
+        } else {
+          if (target.kind === 'remote' && !target.agent) {
+            throw new Error('session is not live — reopen the workspace session to probe its remote host')
+          }
+          callSeq += 1
+          const callId = `dsh-remote-gpu-switch-${Date.now().toString(36)}-${callSeq}`
+          // The tools service takes a batch: `calls` with a JSON-string
+          // `arguments` per call, settling to `{ results: [{ callId, result }] }`
+          // where each result is the materialized tool result (content blocks).
+          const batch = await ctx.tools.execute({
+            calls: [
+              {
+                id: callId,
+                name: 'rw_exec',
+                arguments: JSON.stringify({
+                  command: settings.command,
+                  // `rw_exec` promotes a timed-out command to a background job by
+                  // default, and that path calls `jobs.start({ owner: agent?.id })`.
+                  // A probe has no turn to attach a job to, so opt out entirely.
+                  promoteOnTimeout: false,
+                  // Fail the call ourselves rather than inheriting a longer budget.
+                  timeoutMs: Math.min(600000, Math.max(1000, settings.commandTimeoutMs)),
+                }),
+              },
+            ],
+            signal: abort.signal,
+            ...(target.agent ? { agent: target.agent } : {}),
+          })
+          const result = batch?.results?.[0]?.result
+          if (!result || result.isError) {
+            const caused = result?.error?.message
+              ?? result?.content?.[0]?.text
+              ?? 'unknown error'
+            throw new Error(caused)
+          }
+          text = typeof result.content?.[0]?.text === 'string' ? result.content[0].text : ''
+        }
+        applyParsed(context, parseGpuOutput(text), target)
       } catch (error) {
         // The batch executor wraps scheduler failures in a generic
         // "Tool batch execution failed"; the real reason is on `cause`.
         const own = error instanceof Error ? error.message : String(error)
         const cause = error?.cause instanceof Error ? error.cause.message : null
         const failure = describeFailure(cause ? `${own} (${cause})` : own)
-        state.status = 'error'
-        state.error = failure.message
-        state.hint = failure.hint
-        state.updatedAt = Date.now()
+        context.status = 'error'
+        context.error = failure.message
+        context.hint = failure.hint
+        context.updatedAt = Date.now()
       } finally {
-        inFlight = null
+        context.inFlight = null
       }
     })()
-    return inFlight
+    return context.inFlight
   }
 
-  /** Append one sample to the sparkline history. */
-  function pushHistory() {
-    const utilization = state.gpus.reduce((max, gpu) => {
-      const value = gpu.utilization
-      return typeof value === 'number' && value > max ? value : max
-    }, 0)
-    history.push({ t: state.updatedAt, util: utilization })
-    while (history.length > settings.historyLength) history.shift()
-  }
-
-  /** Start the refresh timer when a client starts watching. */
-  function ensureTimer() {
-    if (timer !== null) return
-    timer = setInterval(() => {
-      if (settings.idleStopMs > 0 && Date.now() - lastRequestAt > settings.idleStopMs) {
-        clearInterval(timer)
-        timer = null
+  /** Start a machine's refresh timer when a client starts watching it. */
+  function ensureTimer(context) {
+    if (context.timer !== null) return
+    context.timer = setInterval(() => {
+      if (settings.idleStopMs > 0 && Date.now() - context.lastRequestAt > settings.idleStopMs) {
+        clearInterval(context.timer)
+        context.timer = null
         return
       }
-      void probe()
+      if (context.target) void probe(context, context.target)
     }, settings.intervalMs)
-    if (typeof timer.unref === 'function') timer.unref()
+    if (typeof context.timer.unref === 'function') context.timer.unref()
   }
 
   /**
    * The JSON payload the client renders.
+   * @param {object} context - sample holder.
    * @returns {object} snapshot.
    */
-  function snapshot() {
-    const gpus = state.gpus.map((gpu) => ({ ...gpu, idle: isIdleGpu(gpu, settings) }))
+  function snapshot(context) {
+    const target = context.target
+    const gpus = context.gpus.map((gpu) => ({ ...gpu, idle: isIdleGpu(gpu, settings) }))
     return {
-      status: state.status,
-      host: state.host,
-      backend: state.backend,
+      status: context.status,
+      target: target ? publicTarget(target, context) : null,
+      local: target ? target.kind === 'local' : false,
+      host: context.host,
+      backend: context.backend,
       gpus,
-      users: summarizeUsers(state.gpus),
+      users: summarizeUsers(context.gpus),
       idle: {
         count: gpus.filter((gpu) => gpu.idle).length,
         total: gpus.length,
         utilPercent: settings.idleUtilPercent,
         memoryPercent: settings.idleMemoryPercent,
       },
-      error: state.error,
-      hint: state.hint,
-      updatedAt: state.updatedAt,
-      requests: state.requests,
+      error: context.error,
+      hint: context.hint,
+      updatedAt: context.updatedAt,
+      requests: context.requests,
       intervalMs: settings.intervalMs,
-      command: settings.command,
-      history: history.slice(-settings.historyLength),
+      command: target && target.kind === 'local' ? settings.localCommand : settings.command,
+      history: context.history.slice(-settings.historyLength),
     }
+  }
+
+  /**
+   * Serve one machine's snapshot, probing it when stale or never sampled.
+   * @param {object} context - sample holder.
+   * @param {object} target - from {@link resolveTarget}.
+   */
+  async function serve(context, target) {
+    const now = Date.now()
+    context.target = target
+    context.lastRequestAt = now
+    context.requests += 1
+    lastContext = context
+    ensureTimer(context)
+    const stale = context.updatedAt === 0 || now - context.updatedAt > settings.intervalMs
+    if (stale) {
+      const pending = probe(context, target)
+      // The very first caller waits for the sample; later callers get the
+      // cached one right away and the refresh lands in the background.
+      if (context.updatedAt === 0) await pending
+    }
+    return snapshot(context)
   }
 
   const routes = [
     {
-      path: '/dsh-remote-gpu/gpu',
+      path: '/dsh-remote-gpu-switch/gpu',
       methods: ['GET'],
       requestBody: 'buffered',
       async handler(req, res) {
-        lastRequestAt = Date.now()
-        state.requests += 1
-        ensureTimer()
-        const stale = state.updatedAt === 0 || Date.now() - state.updatedAt > settings.intervalMs
-        if (stale) {
-          const pending = probe()
-          // The very first caller waits for the sample; later callers get the
-          // cached one right away and the refresh lands in the background.
-          if (state.updatedAt === 0) await pending
+        let body
+        try {
+          const url = new URL(req.url || '/', 'http://localhost')
+          const sessionId = (url.searchParams.get('sessionId') || '').trim()
+          if (sessionId) {
+            const target = resolveTarget(sessionId)
+            body = await serve(contextFor(target.key), target)
+          } else if (lastContext) {
+            // Settings has no session; show the machine the user was last
+            // looking at instead of an unrelated active machine.
+            body = await serve(lastContext, lastContext.target)
+          } else {
+            if (!legacyContext) legacyContext = contextFor('legacy')
+            body = await serve(legacyContext, { key: 'legacy', kind: 'legacy', sessionId: '' })
+          }
+        } catch (error) {
+          body = {
+            status: 'error',
+            target: null,
+            local: false,
+            host: '',
+            backend: 'none',
+            gpus: [],
+            users: [],
+            idle: { count: 0, total: 0, utilPercent: settings.idleUtilPercent, memoryPercent: settings.idleMemoryPercent },
+            error: error instanceof Error ? error.message : String(error),
+            hint: null,
+            updatedAt: Date.now(),
+            requests: 0,
+            intervalMs: settings.intervalMs,
+            command: settings.command,
+            history: [],
+          }
         }
         res.statusCode = 200
         res.setHeader('Content-Type', 'application/json; charset=utf-8')
-        res.end(JSON.stringify(snapshot()))
+        res.end(JSON.stringify(body))
       },
     },
   ]
@@ -388,10 +617,10 @@ export function apply(ctx, config) {
   ctx.effect(() => ctx.tools.register({
     name: 'remote_gpu',
     description:
-      'Live GPU utilization of the server dsh-remote is connected to: per-GPU compute load, '
-      + 'memory usage, temperature, the remote hostname and the users whose processes occupy '
-      + 'each GPU. Use it to check whether the remote GPU is busy, idle, hot or out of memory, '
-      + 'and who is using it.',
+      'Live GPU utilization of the machine the current workspace belongs to: a local workspace probes '
+      + 'this host, a remote workspace probes its dsh-remote host. Returns per-GPU compute load, memory '
+      + 'usage, temperature, the host and the users whose processes occupy each GPU. Use it to check '
+      + 'whether the GPU of the current workspace is busy, idle, hot or out of memory, and who is using it.',
     parameters: {
       type: 'object',
       properties: {},
@@ -408,9 +637,15 @@ export function apply(ctx, config) {
       },
       render: (_args, value) => [{ type: 'text', text: value?.text ?? '' }],
     },
-    async execute() {
-      await probe()
-      return { text: formatSnapshot(snapshot()) }
+    async execute(_args, exec) {
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : ''
+      const target = resolveTarget(sessionId)
+      const context = contextFor(target.key)
+      await probe(context, target)
+      context.lastRequestAt = Date.now()
+      context.requests += 1
+      lastContext = context
+      return { text: formatSnapshot(snapshot(context)) }
     },
-  }), 'dsh-remote-gpu.tool')
+  }), 'dsh-remote-gpu-switch.tool')
 }

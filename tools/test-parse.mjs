@@ -1,4 +1,4 @@
-// Parser check for dsh-remote-gpu. Run with:
+// Parser check for dsh-remote-gpu-switch. Run with:
 //   node tools/test-parse.mjs
 import { parseGpuOutput, splitSections } from '../lib/gpu-parse.js'
 

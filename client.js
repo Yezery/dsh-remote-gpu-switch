@@ -1,4 +1,4 @@
-// dsh-remote-gpu — client half.
+// dsh-remote-gpu-switch — client half.
 //
 // Three seats in the Harness UI:
 //   • a sidebar-right tab that shows every GPU of the remote server,
@@ -9,14 +9,14 @@
 // the factory receives a synchronous `require`.
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-remote-gpu',
+  id: 'dsh-remote-gpu-switch',
   factory(require) {
     const React = require('react')
     const h = React.createElement
     const { useState, useEffect, useMemo, useRef } = React
 
-    const NS = 'dsh-remote-gpu'
-    const KIND = 'dsh-remote-gpu/gpu'
+    const NS = 'dsh-remote-gpu-switch'
+    const KIND = 'dsh-remote-gpu-switch/gpu'
     const GUIDE_ORDER = 56
 
     /** The plugin context, kept so the chip can reach the right-sidebar controller on click. */
@@ -35,37 +35,43 @@ window.__ModuleLoader__.load({
         sidebar.openTab(KIND)
         return true
       } catch (error) {
-        console.warn('[dsh-remote-gpu] could not open the GPU panel:', error)
+        console.warn('[dsh-remote-gpu-switch] could not open the GPU panel:', error)
         return false
       }
     }
 
     const zh = {
-      'tab.title': '远程显卡',
-      'guide.title': '远程显卡占用',
-      'chip.title': '远程服务器显卡占用（{host}）',
-      'chip.title.error': '远程服务器显卡探测失败（{host}）：{error}',
-      'chip.hint': '点击打开远程显卡面板',
+      'tab.title': '显卡',
+      'guide.title': '工作区显卡占用',
+      'chip.title': '工作区显卡占用（{host}）',
+      'chip.title.error': '显卡探测失败（{host}）：{error}',
+      'chip.hint': '点击打开显卡面板',
       'chip.idle': '空闲 {idle}/{total}',
-      'settings.title': '远程显卡',
-      'settings.heading': '远程服务器显卡占用',
+      'chip.none': '无 GPU',
+      'settings.title': '显卡',
+      'settings.heading': '工作区显卡占用',
       'settings.status': '状态',
       'settings.status.ok': '正常',
       'settings.status.error': '探测失败',
       'settings.status.idle': '等待探测',
       'settings.idle': '空闲显卡',
-      'settings.host': '远程主机',
+      'settings.workspace': '工作区',
+      'settings.machine': '所属主机',
+      'settings.host': '探测主机',
       'settings.backend': '探测方式',
       'settings.interval': '刷新间隔',
       'settings.updated': '最近更新',
       'settings.command': '探测命令',
       'settings.refresh': '立即刷新',
       'settings.refreshing': '刷新中…',
-      'settings.empty': '远程服务器上没有检测到显卡。',
+      'settings.empty': '该主机上没有检测到显卡。',
       'settings.hint': '提示',
-      'loading': '正在探测远程显卡…',
+      'loading': '正在探测显卡…',
       'error.fetch': '无法连接宿主服务：{message}',
-      'error.remote': '远程探测失败',
+      'error.remote': '显卡探测失败',
+      'target.local': '本机',
+      'target.remote': '远程',
+      'target.unknown': '未知主机',
       'gpu.util': '占用',
       'gpu.memory': '显存',
       'gpu.temp': '温度',
@@ -78,35 +84,43 @@ window.__ModuleLoader__.load({
       'gpu.users.active': '活跃用户',
       'gpu.users.none': '当前没有进程占用显卡',
       'gpu.users.detail': '{count} 个进程 · {gpus} 张卡 · {memory}',
+      'gpu.local.none': '本机没有可用 GPU',
+      'gpu.local.none.hint': '未找到 nvidia-smi / rocm-smi / gpustat，本机无需分配显卡。',
       'history': '最近 {count} 次采样',
     }
 
     const en = {
-      'tab.title': 'Remote GPU',
-      'guide.title': 'Remote GPU usage',
-      'chip.title': 'Remote server GPU usage ({host})',
-      'chip.title.error': 'Remote GPU probe failed ({host}): {error}',
-      'chip.hint': 'Click to open the remote GPU panel',
+      'tab.title': 'GPU',
+      'guide.title': 'Workspace GPU usage',
+      'chip.title': 'Workspace GPU usage ({host})',
+      'chip.title.error': 'GPU probe failed ({host}): {error}',
+      'chip.hint': 'Click to open the GPU panel',
       'chip.idle': '{idle}/{total} idle',
-      'settings.title': 'Remote GPU',
-      'settings.heading': 'Remote server GPU usage',
+      'chip.none': 'No GPU',
+      'settings.title': 'GPU',
+      'settings.heading': 'Workspace GPU usage',
       'settings.status': 'Status',
       'settings.status.ok': 'OK',
       'settings.status.error': 'Probe failed',
       'settings.status.idle': 'Waiting for the first probe',
       'settings.idle': 'Idle GPUs',
-      'settings.host': 'Remote host',
+      'settings.workspace': 'Workspace',
+      'settings.machine': 'Host',
+      'settings.host': 'Probe host',
       'settings.backend': 'Probe backend',
       'settings.interval': 'Refresh interval',
       'settings.updated': 'Last update',
       'settings.command': 'Probe command',
       'settings.refresh': 'Refresh now',
       'settings.refreshing': 'Refreshing…',
-      'settings.empty': 'No GPU was detected on the remote server.',
+      'settings.empty': 'No GPU was detected on this host.',
       'settings.hint': 'Hint',
-      'loading': 'Probing the remote GPU…',
+      'loading': 'Probing the GPU…',
       'error.fetch': 'Cannot reach the host service: {message}',
-      'error.remote': 'Remote probe failed',
+      'error.remote': 'GPU probe failed',
+      'target.local': 'Local',
+      'target.remote': 'Remote',
+      'target.unknown': 'Unknown host',
       'gpu.util': 'utilization',
       'gpu.memory': 'memory',
       'gpu.temp': 'temp',
@@ -119,6 +133,8 @@ window.__ModuleLoader__.load({
       'gpu.users.active': 'Active users',
       'gpu.users.none': 'No process is occupying a GPU right now',
       'gpu.users.detail': '{count} proc(s) · {gpus} GPU(s) · {memory}',
+      'gpu.local.none': 'No usable GPU on this machine',
+      'gpu.local.none.hint': 'No nvidia-smi / rocm-smi / gpustat was found; there is no GPU to allocate here.',
       'history': 'last {count} samples',
     }
 
@@ -433,85 +449,102 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The shared poller. One request in flight at a time, one timer for every
-     * mounted surface, and the poll cadence follows the host's own interval.
+     * The shared poller, keyed by session (that is, by workspace).
+     *
+     * A machine switch means a different session id, so every surface asks for
+     * its own workspace's host; one request in flight per machine, one timer
+     * per mounted machine, and the poll cadence follows the host's interval.
+     * The no-session key ('') is the settings page: it shows whichever machine
+     * was viewed last.
      */
-    const store = (() => {
-      let snapshot = null
-      let failure = null
-      let timer = null
-      let refreshing = false
+    const stores = new Map()
+
+    /**
+     * The poller for one session ('' when there is no session context).
+     * @param {string} key - session id or ''.
+     */
+    function storeFor(key) {
+      let store = stores.get(key)
+      if (store) return store
+
       const subscribers = new Set()
+      const state = { snapshot: null, failure: null, timer: null, refreshing: false }
 
       const notify = () => {
         for (const subscriber of Array.from(subscribers)) {
           try {
-            subscriber(snapshot, failure)
+            subscriber(state.snapshot, state.failure)
           } catch (error) {
-            console.warn('[dsh-remote-gpu] subscriber failed:', error)
+            console.warn('[dsh-remote-gpu-switch] subscriber failed:', error)
           }
         }
       }
 
       const refresh = async () => {
-        if (refreshing) return
-        refreshing = true
+        if (state.refreshing) return
+        state.refreshing = true
         try {
-          const response = await fetch(apiPath('/dsh-remote-gpu/gpu'), {
+          const query = key ? `?sessionId=${encodeURIComponent(key)}` : ''
+          const response = await fetch(apiPath(`/dsh-remote-gpu-switch/gpu${query}`), {
             headers: { accept: 'application/json' },
           })
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
-          snapshot = await response.json()
-          failure = null
+          state.snapshot = await response.json()
+          state.failure = null
         } catch (error) {
-          failure = error instanceof Error ? error.message : String(error)
+          state.failure = error instanceof Error ? error.message : String(error)
         } finally {
-          refreshing = false
+          state.refreshing = false
           notify()
         }
       }
 
       const schedule = () => {
-        if (timer !== null) clearTimeout(timer)
-        timer = null
+        if (state.timer !== null) clearTimeout(state.timer)
+        state.timer = null
         if (subscribers.size === 0) return
-        const interval = Number(snapshot && snapshot.intervalMs)
+        const interval = Number(state.snapshot && state.snapshot.intervalMs)
         const delay = Number.isFinite(interval) && interval >= 1000 ? interval : 3000
-        timer = setTimeout(() => {
+        state.timer = setTimeout(() => {
           void refresh().then(schedule)
         }, delay)
       }
 
-      return {
+      store = {
         subscribe(subscriber) {
           subscribers.add(subscriber)
           if (subscribers.size === 1) void refresh().then(schedule)
           return () => {
             subscribers.delete(subscriber)
-            if (subscribers.size === 0 && timer !== null) {
-              clearTimeout(timer)
-              timer = null
+            if (subscribers.size === 0 && state.timer !== null) {
+              clearTimeout(state.timer)
+              state.timer = null
             }
           }
         },
         refresh,
         get() {
-          return { snapshot, failure }
+          return { snapshot: state.snapshot, failure: state.failure }
         },
       }
-    })()
+      stores.set(key, store)
+      return store
+    }
 
     /**
-     * Subscribe a component to the shared poller.
+     * Subscribe a component to its workspace's poller.
+     * @param {string} sessionId - the workspace's session, or '' for settings.
      * @param {boolean} active - whether the surface is on screen.
      */
-    function useGpu(active) {
-      const initial = store.get()
-      const [state, setState] = useState(() => ({ snapshot: initial.snapshot, failure: initial.failure }))
+    function useGpu(sessionId, active) {
+      const key = sessionId ? String(sessionId) : ''
+      const [state, setState] = useState(() => storeFor(key).get())
       useEffect(() => {
+        const store = storeFor(key)
+        setState(store.get())
         if (active === false) return undefined
         return store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
-      }, [active])
+      }, [key, active])
       return state
     }
 
@@ -760,11 +793,30 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * The machine a snapshot belongs to, as one display line.
+     * @param {object} snapshot - served snapshot.
+     * @returns {string} e.g. "本机 · macbook" or "gpu-lab · root@10.0.0.5:22".
+     */
+    function machineLabel(snapshot) {
+      const target = (snapshot && snapshot.target) || {}
+      if (target.kind === 'local') {
+        const host = snapshot && snapshot.host ? ` · ${snapshot.host}` : ''
+        return `${tr('target.local')}${host}`
+      }
+      if (target.kind === 'remote') {
+        const label = target.label || target.address || '—'
+        const address = target.address && target.address !== label ? ` · ${target.address}` : ''
+        return `${tr('target.remote')} · ${label}${address}`
+      }
+      return tr('target.unknown')
+    }
+
     /** The sidebar tab body. */
     function GpuPanel(props) {
       const info = typeof props.useTabInfo === 'function' ? props.useTabInfo() : null
       const visible = info && info.tab ? info.tab.visible !== false : true
-      const { snapshot, failure } = useGpu(visible)
+      const { snapshot, failure } = useGpu(props.sessionId, visible)
 
       const body = useMemo(() => {
         if (failure) {
@@ -805,11 +857,12 @@ window.__ModuleLoader__.load({
                 gap: 6,
               },
             },
-            h('div', null, `${tr('error.remote')}: ${snapshot.error ?? ''}`),
+            h('div', null, `${tr('error.remote')} · ${machineLabel(snapshot)}: ${snapshot.error ?? ''}`),
             snapshot.hint ? h('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, snapshot.hint) : null,
           )
         }
         if (!snapshot.gpus || snapshot.gpus.length === 0) {
+          const local = snapshot.local === true
           return h(
             'div',
             {
@@ -824,8 +877,14 @@ window.__ModuleLoader__.load({
                 gap: 6,
               },
             },
-            h('div', null, tr('settings.empty')),
-            snapshot.hint ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, snapshot.hint) : null,
+            h('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
+              machineLabel(snapshot)),
+            h('div', null, local ? tr('gpu.local.none') : tr('settings.empty')),
+            local
+              ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('gpu.local.none.hint'))
+              : snapshot.hint
+                ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, snapshot.hint)
+                : null,
           )
         }
         return h(
@@ -867,7 +926,7 @@ window.__ModuleLoader__.load({
               h(
                 'span',
                 { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                `${snapshot.host || '—'} · ${snapshot.backend}`,
+                `${machineLabel(snapshot)} · ${snapshot.backend}`,
               ),
             ),
             h('span', null, [
@@ -901,7 +960,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         {
-          'data-dsh-remote-gpu-panel': '',
+          'data-dsh-remote-gpu-switch-panel': '',
           style: {
             padding: 12,
             display: 'flex',
@@ -919,22 +978,24 @@ window.__ModuleLoader__.load({
 
     /** The conversation header chip: it only tells how many GPUs are free; clicking it opens the detail panel. */
     function GpuChip(props) {
-      const { snapshot } = useGpu(true)
+      const { snapshot } = useGpu(props.sessionId, true)
       const gpus = (snapshot && snapshot.gpus) || []
       const counts = idleCounts(gpus)
       if (!snapshot) return null
       const failed = snapshot.status !== 'ok'
-      const tone = failed ? 'danger' : idleTone(counts)
+      const noGpu = !failed && snapshot.local === true && counts.total === 0
+      const tone = failed ? 'danger' : noGpu ? 'muted' : idleTone(counts)
       const users = ((snapshot.users || []).map((entry) => `${entry.user}×${entry.count}`)).join(', ')
+      const host = machineLabel(snapshot)
       const chipTitle = failed
-        ? tr('chip.title.error', { host: snapshot.host || '—', error: snapshot.hint || snapshot.error || '—' })
-        : `${tr('chip.title', { host: snapshot.host || '—' })}`
-          + ` · ${tr('chip.idle', { idle: counts.idle, total: counts.total })}`
+        ? tr('chip.title.error', { host, error: snapshot.hint || snapshot.error || '—' })
+        : `${tr('chip.title', { host })}`
+          + ` · ${noGpu ? tr('chip.none') : tr('chip.idle', { idle: counts.idle, total: counts.total })}`
           + (users ? ` · ${tr('gpu.users.by')} ${users}` : '')
       return h(
         'button',
         {
-          'data-dsh-remote-gpu-chip': '',
+          'data-dsh-remote-gpu-switch-chip': '',
           type: 'button',
           className: `dsh-rg-pill is-${tone}`,
           'aria-label': chipTitle,
@@ -971,13 +1032,15 @@ window.__ModuleLoader__.load({
         h('span', { style: { fontVariantNumeric: 'tabular-nums' } },
           failed
             ? 'GPU --'
-            : tr('chip.idle', { idle: counts.idle, total: counts.total })),
+            : noGpu
+              ? tr('chip.none')
+              : tr('chip.idle', { idle: counts.idle, total: counts.total })),
       )
     }
 
     /** The settings section. */
     function GpuSettingsPage() {
-      const { snapshot, failure } = useGpu(true)
+      const { snapshot, failure } = useGpu('', true)
       const [busy, setBusy] = useState(false)
 
       const row = (label, value) => h(
@@ -1011,6 +1074,14 @@ window.__ModuleLoader__.load({
         { style: { display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 } },
         h('div', { style: { fontWeight: 600 } }, tr('settings.heading')),
         row(tr('settings.status'), h('span', { style: { color: statusColor } }, statusText)),
+        row(tr('settings.workspace'), snapshot && snapshot.target
+          ? (snapshot.target.kind === 'local' ? tr('target.local') : tr('target.remote'))
+          : '—'),
+        row(tr('settings.machine'), snapshot && snapshot.target
+          ? (snapshot.target.kind === 'local'
+            ? (snapshot.hostname || snapshot.host || '—')
+            : `${snapshot.target.label || '—'}${snapshot.target.address ? ` · ${snapshot.target.address}` : ''}`)
+          : '—'),
         row(tr('settings.host'), snapshot && snapshot.host ? snapshot.host : '—'),
         row(tr('settings.backend'), snapshot && snapshot.backend ? snapshot.backend : '—'),
         row(
@@ -1029,6 +1100,21 @@ window.__ModuleLoader__.load({
               'div',
               { style: { color: 'var(--dsw-alias-label-secondary)' } },
               `${tr('settings.hint')}: ${snapshot.hint}`,
+            )
+          : null,
+        snapshot && snapshot.local === true && (!snapshot.gpus || snapshot.gpus.length === 0)
+          ? h(
+              'div',
+              {
+                style: {
+                  padding: 10,
+                  borderRadius: 8,
+                  border: '1px solid var(--dsw-alias-border-l2)',
+                  color: 'var(--dsw-alias-label-secondary)',
+                },
+              },
+              h('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, tr('gpu.local.none')),
+              h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('gpu.local.none.hint')),
             )
           : null,
         failure
@@ -1092,7 +1178,7 @@ window.__ModuleLoader__.load({
             disabled: busy,
             onClick: () => {
               setBusy(true)
-              void store.refresh().finally(() => setBusy(false))
+              void storeFor('').refresh().finally(() => setBusy(false))
             },
             style: {
               alignSelf: 'flex-start',
@@ -1117,12 +1203,12 @@ window.__ModuleLoader__.load({
       // The plugin stylesheet lives for exactly as long as the plugin does.
       const injectStyles = () => {
         const style = document.createElement('style')
-        style.setAttribute('data-dsh-remote-gpu', '')
+        style.setAttribute('data-dsh-remote-gpu-switch', '')
         style.textContent = STYLES
         document.head.appendChild(style)
         return () => style.remove()
       }
-      if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'dsh-remote-gpu.styles')
+      if (typeof ctx.effect === 'function') ctx.effect(injectStyles, 'dsh-remote-gpu-switch.styles')
       else injectStyles()
 
       ctx.inject(['locale'], (inner) => {
@@ -1139,25 +1225,25 @@ window.__ModuleLoader__.load({
           () => slots.inject('conversation.session.header.utilities', () => slots.register(
             {
               name: 'conversation.session.header.utilities',
-              id: 'dsh-remote-gpu-chip',
+              id: 'dsh-remote-gpu-switch-chip',
               order: 15,
             },
             GpuChip,
           )),
-          'dsh-remote-gpu.chip',
+          'dsh-remote-gpu-switch.chip',
         )
 
         inner.effect(
           () => slots.inject('settings.section', () => slots.register(
             {
               name: 'settings.section',
-              id: 'dsh-remote-gpu',
+              id: 'dsh-remote-gpu-switch',
               order: 41,
               label: () => tr('settings.title'),
             },
             () => h(GpuSettingsPage, null),
           )),
-          'dsh-remote-gpu.settings',
+          'dsh-remote-gpu-switch.settings',
         )
       })
 
@@ -1177,7 +1263,7 @@ window.__ModuleLoader__.load({
             title: () => tr('tab.title'),
             guide: [{ order: GUIDE_ORDER, title: () => tr('guide.title') }],
           }),
-          'dsh-remote-gpu.tab-type',
+          'dsh-remote-gpu-switch.tab-type',
         )
 
         inner.effect(
@@ -1189,13 +1275,13 @@ window.__ModuleLoader__.load({
               for (const dispose of disposers) dispose()
             }
           }),
-          'dsh-remote-gpu.tab-body',
+          'dsh-remote-gpu-switch.tab-body',
         )
       })
     }
 
     return {
-      name: 'dsh-remote-gpu',
+      name: 'dsh-remote-gpu-switch',
       inject: ['slots', 'locale'],
       apply,
     }

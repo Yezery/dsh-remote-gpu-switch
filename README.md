@@ -1,19 +1,45 @@
-# dsh-remote-gpu
+# dsh-remote-gpu-switch
 
-A DSH plugin that shows **live GPU utilization of the server `dsh-remote` is connected to**.
+A DSH plugin that shows **live GPU utilization of the machine the current workspace belongs to**.
 
-It piggybacks on `dsh-remote`: the host half calls dsh-remote's own `rw_exec` tool
-through the host `tools` service, so no second SSH connection, no duplicated
-credential handling, and no extra dependency.
+Open a **local** workspace and it probes this computer; open a **remote** workspace and it
+probes the SSH host that workspace is bound to, through dsh-remote. Switch workspaces and the
+GPU view switches hosts with it.
+
+Remote probing piggybacks on `dsh-remote`: the host half calls dsh-remote's own `rw_exec` tool
+as the session's agent, so no second SSH connection, no duplicated credential handling, and no
+extra dependency. The workspace's `.dsh-remote-meta.json` is what dsh-remote itself uses, so the
+GPU view always lands on the same host as the session's `rw_*` tools.
 
 ## What you get
 
 | Seat | What it shows |
 | --- | --- |
-| Conversation header chip | `空闲 {idle}/{total}` — **only how many remote GPUs are free** (colour-coded: green = all free, amber = some free, red = none). Click it to open the panel for the details. The tooltip also lists the users currently on the GPU box (`占用 <user>×<n>`). |
-| Right sidebar tab `远程显卡` | Every GPU of the remote host in detail: name, utilization %, memory used/total, temperature, **the user who owns the task running on it** (`占用 <user>×<n>`), a `空闲` tag on the free cards, plus a sparkline of recent samples. |
-| Settings → `远程显卡` | Probe status, remote host, backend, idle count, refresh interval, the exact probe command, a "refresh now" button, the per-GPU process list (user · command · pid · memory) and an "active users" summary. |
-| Host tool `remote_gpu` | The same snapshot as text, so the agent can read it directly. |
+| Conversation header chip | `空闲 {idle}/{total}` for the current workspace's host (green = all free, amber = some free, red = none). Local workspace without a GPU shows `无 GPU` in muted grey. The tooltip names the machine and the users currently on it. Click to open the panel. |
+| Right sidebar tab `显卡` | Every GPU of that host in detail: name, utilization %, memory used/total, temperature, **the user who owns the task running on it** (`占用 <user>×<n>`), an `空闲` tag on free cards, the machine identity (local hostname / remote alias + address) and a sparkline of recent samples. |
+| Settings → `显卡` | Probe status, workspace kind, machine, probed hostname, backend, idle count, refresh interval, the exact probe command, a "refresh now" button, the per-GPU process list and an "active users" summary. |
+| Host tool `remote_gpu` | The same snapshot as text for the agent, resolved from the calling session's own workspace. |
+
+## Local and remote are one entry point
+
+The split happens once, by the session's workspace directory:
+
+- **Local workspace** — the session cwd is a normal directory. The host runs the probe script
+  on this machine and parses the same output. If no GPU backend exists, the status stays `ok`
+  with an explicit **「本机没有可用 GPU」** message: no error card, no empty panel.
+- **Remote workspace** — the session cwd sits inside a dsh-remote mirror
+  (`$DSH_HOME/remote-workspaces/...`, the directory carrying `.dsh-remote-meta.json`). The
+  probe still goes through `rw_exec`, now bound to *that workspace's* host and agent, so several
+  remote hosts can be watched by simply switching workspaces. The remote display path is
+  unchanged, and the probe runs under the same session sandbox policy as the session's own
+  `rw_*` tools (a read-only remote session refuses the exec).
+- **No session context** — the `remote_gpu` tool outside a session, or the settings page before
+  any workspace was viewed, keeps the original behaviour and targets the active dsh-remote
+  machine.
+
+The host keeps one sample per machine (`local`, or `remote:user@host:port`), so two workspaces on
+the same host share one reading while workspaces on different hosts stay independent. Host is the
+switchable dimension; GPUs are the devices inside one host and are never mixed across machines.
 
 ## What counts as a free GPU
 
@@ -28,7 +54,8 @@ with every sample, so the chip, the panel and the `remote_gpu` tool always
 agree on the same number.
 
 ```
-Remote host <host> — <backend>
+Local host <hostname> — <backend>
+Remote host <user>@<host>:<port> — <backend>
 Idle GPUs: <idle>/<total> (util < 10%, memory < 5%)
 GPU <index> <name> · util <n>% · memory <used>/<total> MiB · temp <n>°C · idle
 GPU <index> <name> · util <n>% · memory <used>/<total> MiB · temp <n>°C · users <user>×<n>
@@ -44,7 +71,7 @@ GPU <index> · <name>
 ```
 
 The panel header adds the overall count (`<total> 张显卡 · 空闲 <idle> 张 · <users> 个用户`),
-and the chip tooltip summarises the same thing. On NVIDIA servers the probe adds
+and the chip tooltip summarises the same thing. On NVIDIA hosts the probe adds
 three extra sections to the command:
 
 ```sh
@@ -55,7 +82,7 @@ ps -o pid=,user=,comm= -p <pids>                                  # ==DSHGPU ps=
 
 `lib/gpu-parse.js` maps the GPU UUIDs to indices and the PIDs to their owner
 (`user` + command), so each GPU ends up with `processes[]` and a per-GPU
-`users[]` summary. On ROCm / gpustat servers the process list stays empty —
+`users[]` summary. On ROCm / gpustat hosts the process list stays empty —
 those tools do not expose per-process GPU ownership.
 
 ## Motion
@@ -74,12 +101,13 @@ Every reading eases into place instead of snapping:
 
 ## How the probe works
 
-The host runs one POSIX shell line on the remote machine. It picks the first
-available backend and wraps every part in `==DSHGPU …==` markers:
+On a **remote** host it runs one POSIX shell line through `rw_exec`; on a
+**local** host the same line runs through `sh -c`. It picks the first available
+backend and wraps every part in `==DSHGPU …==` markers:
 
 | Section | Content |
 | --- | --- |
-| `host` | `hostname` of the remote machine |
+| `host` | `hostname` of the probed machine |
 | `backend` | `nvidia-smi`, `rocm-smi`, `gpustat` or `none` |
 | `gpus` | one CSV row per GPU (`index,name,utilization.gpu,memory.used,memory.total`) |
 | `temp` | GPU temperature (NVIDIA only) |
@@ -87,11 +115,14 @@ available backend and wraps every part in `==DSHGPU …==` markers:
 | `procs` | running compute apps: `pid,gpu_uuid,used_memory` (NVIDIA only) |
 | `ps` | owner of each PID: `pid,user,command` (NVIDIA only) |
 
-`lib/gpu-parse.js` parses those sections into the snapshot the UI renders.
+`lib/gpu-parse.js` parses those sections into the snapshot the UI renders, and
+`lib/workspace-target.js` maps a session cwd to its remote origin.
 
-Requirements on the remote server: `nvidia-smi` (or `rocm-smi` / `gpustat`) on `PATH`,
-and a dsh-remote **active remote workspace** (the probe uses the machine dsh-remote is
-currently connected to).
+Requirements: `nvidia-smi` (or `rocm-smi` / `gpustat`) on `PATH` — remotely for
+a remote workspace, locally for a local one. Remote workspaces need a
+dsh-remote **active remote workspace** session. Local probing uses `sh`, so on
+Windows it needs Git Bash's `sh` on `PATH`; without it the panel reports a local
+probe error instead of a false "no GPU".
 
 ## Configuration
 
@@ -99,23 +130,24 @@ currently connected to).
 
 ```yaml
 - insert:
-    - id: dsh-remote-gpu
-      name: '@local/dsh-remote-gpu'
+    - id: dsh-remote-gpu-switch
+      name: dsh-remote-gpu-switch
       config:
         intervalMs: 3000        # refresh cadence (500 – 300000)
-        commandTimeoutMs: 15000 # remote command timeout
-        idleStopMs: 120000      # stop probing when no panel is open
+        commandTimeoutMs: 15000 # probe timeout (local or remote)
+        idleStopMs: 120000      # stop probing a machine after no panel asked for it
         historyLength: 90       # samples kept for the sparkline
         idleUtilPercent: 10     # a card is free below this utilization …
         idleMemoryPercent: 5    # … and below this memory usage
-        # command: '…'          # override the probe command entirely
+        # command: '…'          # override the REMOTE probe command entirely
+        # localCommand: '…'     # override the LOCAL probe command
 ```
 
 ## Install
 
 ```bash
 plugin_manager install_bundle target=<abs path to this directory>
-plugin_manager set_bundle target=@local/dsh-remote-gpu enabled=true
+plugin_manager set_bundle target=dsh-remote-gpu-switch enabled=true
 ```
 
 `install_bundle` only runs pnpm; the second command is what puts the plugin's row
@@ -127,8 +159,25 @@ in the session.
 The plugin is offline-safe: it has **zero runtime dependencies** and imports nothing
 from `@deepseek-ai/*`.
 
-## Layout
+## Checks
 
-One card is ~79 px tall (compact paddings, a single-line footer, a 5 px
-utilization bar and a 3 px memory bar), so a full node fits into the right
-sidebar without scrolling; the panel scrolls when there are more GPUs than fit.
+```bash
+npm test   # all four checks below
+node tools/test-parse.mjs      # probe parser
+node tools/test-targets.mjs    # local vs remote workspace classification
+node tools/test-host.mjs       # local / remote / settings routing
+sh tools/check-command.sh      # probe command survives sh and bash
+```
+
+## Changelog
+
+### 1.2.0
+
+- The GPU view follows the **workspace**, not one global machine: local workspaces probe
+  this host, remote workspaces probe their own dsh-remote host.
+- One cached sample per machine (`local` / `remote:user@host:port`), so switching
+  workspaces switches hosts without one workspace blanking another.
+- Local probing without any GPU backend reports **no GPU** explicitly instead of an error.
+- Remote probing now runs `rw_exec` as the calling session's agent, so dsh-remote resolves
+  the workspace's mirror-bound host (no active-machine fallback, same sandbox policy).
+- Renamed the plugin to `dsh-remote-gpu-switch`.

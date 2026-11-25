@@ -12,7 +12,7 @@ dsh-market 的「发现」列表来自策展目录 `https://awesome-dsh-plugin.c
 仓库根目录就是本插件目录（`package.json`、`cordis.patch.yml`、`index.js`、`client.js` 在根上）。
 
 ```sh
-cd dsh-remote-gpu
+cd dsh-remote-gpu-switch
 git init -b main
 git add -A
 git commit -m "feat: remote GPU monitor plugin for dsh"
@@ -42,11 +42,11 @@ sed -i 's|OWNER/REPO|你的用户名/仓库名|g' package.json
 ## 3. 提 PR
 
 1. Fork `https://github.com/awesome-dsh-plugin/awesome-dsh-plugin`
-2. 把 `market-entry/OWNER__REPO.yml` 复制到 fork 的 `data/plugins/`，**文件名改成
-   `<owner>__<repo>.yml`**（`__` 两个下划线），并把文件里的 `OWNER/REPO` 换成真实值：
+2. 把 `market-entry/Yezery__dsh-remote-gpu-switch.yml` 复制到 fork 的 `data/plugins/`，文件名已按
+   `<owner>__<repo>.yml` 规则取好：
 
    ```sh
-   cp market-entry/OWNER__REPO.yml /path/to/awesome-dsh-plugin/data/plugins/<owner>__<repo>.yml
+   cp market-entry/Yezery__dsh-remote-gpu-switch.yml /path/to/awesome-dsh-plugin/data/plugins/Yezery__dsh-remote-gpu-switch.yml
    ```
 
 3. 不要手改 README（它们由 `data/plugins/*.yml` 生成）
@@ -67,8 +67,7 @@ sed -i 's|OWNER/REPO|你的用户名/仓库名|g' package.json
 
 ## 5. 改名（可选）
 
-`@local/dsh-remote-gpu` 里的 `local` 是「本地私有」的意思，公开收录建议改成一个正常名字
-（如 `dsh-remote-gpu` 或 `@你的scope/dsh-remote-gpu`）。改名要同步三处：
+包名现在是 `dsh-remote-gpu-switch`，已经是一个公开可用的名字。以后若再改名，要同步三处：
 
 - `package.json` → `name`
 - `cordis.patch.yml` → `- insert[].name`
