@@ -194,6 +194,12 @@ sh tools/check-command.sh      # the probe command survives sh and bash
 
 ## Changelog
 
+### 1.4.1
+
+- Turning auto sampling back on resumes the cadence immediately (client timer re-armed, host
+  timer re-armed on the next request), and a mounted surface keeps a watchdog so a stalled
+  poll heals itself instead of waiting for a manual refresh.
+
 ### 1.4.0
 
 - Documentation pass: the README now describes what the plugin does today (workspace-following

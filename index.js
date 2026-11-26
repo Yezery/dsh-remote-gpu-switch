@@ -618,7 +618,14 @@ export function apply(ctx, config) {
     context.lastRequestAt = now
     context.requests += 1
     lastContext = context
-    ensureTimer(context)
+    // A host timer only runs while there is real auto sampling; a request that
+    // arrives with the switch on re-arms it if it had stopped.
+    if (!autoSampling && context.timer !== null) {
+      clearInterval(context.timer)
+      context.timer = null
+    } else if (autoSampling) {
+      ensureTimer(context)
+    }
     const stale = context.updatedAt === 0 || now - context.updatedAt > settings.intervalMs
     if (!autoSampling) {
       // Off means no cadence, not no reading: a request that arrives here is a

@@ -630,7 +630,9 @@ window.__ModuleLoader__.load({
       store = {
         setSampling(on) {
           if (on) {
-            if (subscribers.size > 0) void refresh().then(schedule)
+            // Catch up: a mounted surface that lost its timer (toggled off, or
+            // a request that failed while off) resumes the cadence here.
+            if (subscribers.size > 0 && state.timer === null) void refresh().then(schedule)
             return
           }
           if (state.timer !== null) {
@@ -648,6 +650,12 @@ window.__ModuleLoader__.load({
               state.timer = null
             }
           }
+        },
+        /** Arm the cadence if it is missing (an idempotent watchdog). */
+        ensureRunning() {
+          if (subscribers.size === 0 || state.timer !== null) return
+          if (settingsDraft.get().sampling === false) return
+          void refresh().then(schedule)
         },
         refresh,
         get() {
@@ -702,7 +710,16 @@ window.__ModuleLoader__.load({
         const current = store.get().snapshot
         const age = current && current.updatedAt ? Date.now() - current.updatedAt : Infinity
         if (age > FRESH_MS) void store.refresh()
-        return store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
+        const unsubscribe = store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
+        // A mounted surface with no timer is a stalled view. Arm the cadence
+        // when auto sampling is on, and keep checking: this watchdog turns a
+        // stalled poll into a self-healing one instead of a manual refresh.
+        store.ensureRunning()
+        const heartbeat = setInterval(() => store.ensureRunning(), 5000)
+        return () => {
+          unsubscribe()
+          clearInterval(heartbeat)
+        }
       }, [key, active, pageVisible])
       return { state, reload: () => storeFor(key).refresh() }
     }
