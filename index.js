@@ -15,7 +15,8 @@
 
 import { execFile } from 'node:child_process'
 import { registerHttpTransports } from './lib/http-transport.js'
-import { parseGpuOutput, toWireGpu } from './lib/gpu-parse.js'
+import { parseGpuOutput, splitSections, toWireGpu } from './lib/gpu-parse.js'
+import { cpuSection, parseCpuSection, probeCpu } from './lib/cpu-probe.js'
 import {
   findMirrorForCwd,
   machineKey,
@@ -63,7 +64,24 @@ const DEFAULT_COMMAND = [
     + ' rocm-smi --showuse --showmemuse --showtemp --json 2>/dev/null;',
   "elif command -v gpustat >/dev/null 2>&1; then echo gpustat; echo '==DSHGPU gpus==';"
     + ' gpustat --json 2>/dev/null;',
+  // Apple Silicon has no nvidia-smi: Apple's own unified-memory numbers stand in.
+  'elif [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo apple-silicon;'
+    + " echo '==DSHGPU gpus==';"
+    + ' printf \'%s,%s,%s,%s,%s,%s,%s,%s\\n\' "$(sysctl -n hw.model 2>/dev/null || echo Apple)"'
+    + ' apple-silicon'
+    + ' "$(vm_stat 2>/dev/null | awk \'/free|inactive/ {gsub(/\./,"",$3); f+=$3}'
+    + ' /Pages occupied by compressor/ {c+=$5}'
+    + ' END {printf "%d", (f+c)*16384/1048576}\')"'
+    + ' "$(sysctl -n hw.memsize 2>/dev/null | awk \'{printf "%d", $1/1048576}\')"'
+    + ' 1'
+    + ' "$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo cpu)"'
+    + ' "$(sysctl -n hw.ncpu 2>/dev/null || echo 0)"'
+    + ' macOS;'
+    + ' ps -Ao pcpu=,user=,comm= 2>/dev/null | sort -k1 -nr | head -12'
+    + ' | while read -r c u cmd; do echo "cpu,$c,$u,$(echo "$cmd" | tr \',\' \' \')"; done;',
   'else echo none; fi;',
+  // ===DSHGPU cpu=== is printed by the plugin itself (lib/cpu-probe.js) when
+  // the host has no usable GPU; a remote shell cannot know our settings.
   "echo '==DSHGPU end=='",
 ].join(' ')
 
@@ -74,6 +92,11 @@ const DEFAULTS = {
   historyLength: 90,
   idleUtilPercent: 10,
   idleMemoryPercent: 5,
+  // CPU (unified-memory) fallback when no GPU answers. Off by default: this panel
+  // is about GPUs first, so the CPU costs nothing until asked for.
+  showCpu: false,
+  // Processor rows kept from the snapshot (a box runs thousands; they are not GPUs).
+  cpuTopProcesses: 8,
 }
 
 /**
@@ -115,6 +138,8 @@ function resolveSettings(config) {
     command: custom(raw.command) ? raw.command : DEFAULT_COMMAND,
     // Remote-only overrides must not leak into the local probe (and vice versa).
     localCommand: custom(raw.localCommand) ? raw.localCommand : DEFAULT_COMMAND,
+    showCpu: raw.showCpu === true,
+    cpuTopProcesses: number(raw.cpuTopProcesses, DEFAULTS.cpuTopProcesses, 1, 50),
   }
 }
 
@@ -261,6 +286,9 @@ function formatSnapshot(snapshot) {
  */
 export function apply(ctx, config) {
   const settings = resolveSettings(config)
+  // The CPU fallback is the CLIENT's switch: `?cpu=1` is the settings-page draft
+  // the user committed, so the host config only decides the default.
+  let cpuWanted = settings.showCpu
 
   /** One sample holder per machine (`local`, `remote:user@host:port`) or the legacy active machine. */
   const contexts = new Map()
@@ -287,6 +315,8 @@ export function apply(ctx, config) {
       error: null,
       hint: null,
       updatedAt: 0,
+      // The CPU fallback reading (only while `showCpu` is on).
+      cpu: null,
       // How often a client asked for this machine — proof that the UI is wired.
       requests: 0,
       history: [],
@@ -387,8 +417,9 @@ export function apply(ctx, config) {
    * @param {object} parsed - {@link parseGpuOutput} result.
    * @param {object} target - from {@link resolveTarget}.
    */
-  function applyParsed(context, parsed, target) {
+  function applyParsed(context, parsed, target, cpu = null) {
     context.status = 'ok'
+    context.cpu = cpu
     context.host = parsed.host
     context.backend = parsed.backend
     context.gpus = parsed.gpus.map(toWireGpu)
@@ -438,6 +469,7 @@ export function apply(ctx, config) {
     context.inFlight = (async () => {
       try {
         let text = ''
+        let cpu = null
         if (target.kind === 'unknown') {
           // A blank session has no workspace yet: nothing to probe is a fact, not a failure.
           context.status = 'ok'
@@ -451,6 +483,17 @@ export function apply(ctx, config) {
         }
         if (target.kind === 'local') {
           text = await runLocalProbe(settings.localCommand, settings.commandTimeoutMs)
+          if (cpuWanted) {
+            // The CPU view is a fallback, not a second source: it explains the
+            // GPU reading (unified memory, "no VRAM") and never replaces it.
+            const cpuResult = await probeCpu({
+              timeoutMs: Math.min(settings.commandTimeoutMs, 5000),
+              topProcesses: settings.cpuTopProcesses,
+              maxMemoryMiB: null,
+            })
+            cpu = cpuResult.cpu
+            text = `${text}\n${cpuSection(cpuResult)}`
+          }
         } else {
           // A freshly switched workspace has no sample yet: report "loading"
           // right away instead of leaving the previous reading on screen.
@@ -506,7 +549,8 @@ export function apply(ctx, config) {
             text = result.content.map((block) => (block && block.type === 'text' ? block.text : '')).join('\n')
           }
         }
-        applyParsed(context, parseGpuOutput(text), target)
+        const parsed = parseGpuOutput(text)
+        applyParsed(context, parsed, target, cpu || parsed.cpu || parseCpuSection(splitSections(text).cpu ?? []))
       } catch (error) {
         // The batch executor wraps scheduler failures in a generic
         // "Tool batch execution failed"; the real reason is on `cause`.
@@ -553,6 +597,7 @@ export function apply(ctx, config) {
       host: context.host,
       backend: context.backend,
       gpus,
+      cpu: cpuWanted ? context.cpu : null,
       users: summarizeUsers(context.gpus),
       idle: {
         count: gpus.filter((gpu) => gpu.idle).length,
@@ -602,6 +647,8 @@ export function apply(ctx, config) {
         try {
           const url = new URL(req.url || '/', 'http://localhost')
           const sessionId = (url.searchParams.get('sessionId') || '').trim()
+          const cpuFlag = url.searchParams.get('cpu')
+          if (cpuFlag === '1' || cpuFlag === '0') cpuWanted = cpuFlag === '1'
           if (sessionId) {
             const target = resolveTarget(sessionId)
             body = await serve(contextFor(target.key), target)

@@ -48,13 +48,22 @@ window.__ModuleLoader__.load({
       'chip.hint': '点击打开显卡面板',
       'chip.idle': '空闲 {idle}/{total}',
       'chip.none': '无 GPU',
-      'settings.title': '显卡',
+      'settings.title': '显卡面板',
       'settings.heading': '工作区显卡占用',
       'settings.status': '状态',
       'settings.status.ok': '正常',
       'settings.status.error': '探测失败',
       'settings.status.idle': '等待探测',
       'settings.status.loading': '正在探测…',
+      'cpu.show': '无 GPU 时也显示 CPU / 统一内存',
+      'cpu.hint': '默认关闭。开启后会读取 CPU 与统一内存（如 Apple MPS），显示在下方；GPU 仍然优先。',
+      'cpu.title': 'CPU · 统一内存',
+      'cpu.kind.unified': '统一内存：CPU 与 GPU 共用，可作为显存使用',
+      'cpu.kind.shared': '共享显存：驱动报告了可分给 GPU 的内存量',
+      'cpu.kind.integrated': '核显：存在集成显卡，但驱动未报告可用显存',
+      'cpu.kind.none': '没有可用 GPU',
+      'cpu.mem': '内存 {free} / {total}',
+      'cpu.proc': '占用最多的进程',
       'settings.idle': '空闲显卡',
       'settings.workspace': '工作区',
       'settings.machine': '所属主机',
@@ -64,6 +73,7 @@ window.__ModuleLoader__.load({
       'settings.updated': '最近更新',
       'settings.command': '探测命令',
       'settings.refresh': '立即刷新',
+      'settings.saved': '已保存',
       'settings.refreshing': '刷新中…',
       'settings.empty': '该主机上没有检测到显卡。',
       'settings.hint': '提示',
@@ -101,13 +111,22 @@ window.__ModuleLoader__.load({
       'chip.hint': 'Click to open the GPU panel',
       'chip.idle': '{idle}/{total} idle',
       'chip.none': 'No GPU',
-      'settings.title': 'GPU',
+      'settings.title': 'GPU panel',
       'settings.heading': 'Workspace GPU usage',
       'settings.status': 'Status',
       'settings.status.ok': 'OK',
       'settings.status.error': 'Probe failed',
       'settings.status.idle': 'Waiting for the first probe',
       'settings.status.loading': 'Probing…',
+      'cpu.show': 'Also show CPU / unified memory when there is no GPU',
+      'cpu.hint': 'Off by default. When on, reads the CPU and its unified memory (e.g. Apple MPS) and shows it below; the GPU still comes first.',
+      'cpu.title': 'CPU · unified memory',
+      'cpu.kind.unified': 'Unified memory: shared by the CPU and the GPU, usable as VRAM',
+      'cpu.kind.shared': 'Shared memory: the driver reports what the GPU may use',
+      'cpu.kind.integrated': 'Integrated GPU: present, but its driver reports no VRAM to read',
+      'cpu.kind.none': 'No usable GPU',
+      'cpu.mem': 'memory {free} / {total}',
+      'cpu.proc': 'Busiest processes',
       'settings.idle': 'Idle GPUs',
       'settings.workspace': 'Workspace',
       'settings.machine': 'Host',
@@ -117,6 +136,7 @@ window.__ModuleLoader__.load({
       'settings.updated': 'Last update',
       'settings.command': 'Probe command',
       'settings.refresh': 'Refresh now',
+      'settings.saved': 'Saved',
       'settings.refreshing': 'Refreshing…',
       'settings.empty': 'No GPU was detected on this host.',
       'settings.hint': 'Hint',
@@ -459,6 +479,61 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * User switches the plugin owns on the client (no host storage needed).
+     * The CPU fallback is off unless the user turned it on here.
+     */
+    const PREFS_KEY = 'dsh-remote-gpu-switch.prefs'
+
+    function readPrefs() {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(PREFS_KEY) || '{}')
+        return parsed && typeof parsed === 'object' ? parsed : {}
+      } catch (error) {
+        return {}
+      }
+    }
+
+    function writePrefs(patch) {
+      try {
+        const next = { ...readPrefs(), ...patch }
+        window.localStorage.setItem(PREFS_KEY, JSON.stringify(next))
+        return next
+      } catch (error) {
+        return readPrefs()
+      }
+    }
+
+    /**
+     * The user's switch draft. Toasting it commits it; it is not a host
+     * setting until then, so a half-clicked box changes nothing.
+     */
+    const settingsDraft = (() => {
+      let value = { showCpu: readPrefs().showCpu === true, dirty: false }
+      const listeners = new Set()
+      const emit = () => {
+        for (const listener of Array.from(listeners)) {
+          try { listener(value) } catch (error) { /* one surface is on its own */ }
+        }
+      }
+      return {
+        get() { return value },
+        subscribe(listener) {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        setShowCpu(showCpu) {
+          value = { ...value, showCpu, dirty: true }
+          emit()
+        },
+        commit() {
+          writePrefs({ showCpu: value.showCpu })
+          value = { ...value, dirty: false }
+          emit()
+        },
+      }
+    })()
+
+    /**
      * The shared poller, keyed by session (that is, by workspace).
      *
      * A machine switch means a different session id, so every surface asks for
@@ -495,7 +570,8 @@ window.__ModuleLoader__.load({
         if (state.refreshing) return
         state.refreshing = true
         try {
-          const query = key ? `?sessionId=${encodeURIComponent(key)}` : ''
+          const cpuFlag = settingsDraft.get().showCpu ? '1' : '0'
+          const query = `?cpu=${cpuFlag}${key ? `&sessionId=${encodeURIComponent(key)}` : ''}`
           const response = await fetch(apiPath(`/dsh-remote-gpu-switch/gpu${query}`), {
             headers: { accept: 'application/json' },
           })
@@ -890,6 +966,52 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** The CPU / unified-memory card: what the GPU view cannot show, and why. */
+    function CpuCard(props) {
+      const cpu = props.cpu
+      if (!cpu) return null
+      const kind = String(cpu.memoryKind || 'none')
+      const line = tr(`cpu.kind.${kind}`)
+      return h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: 10,
+            borderRadius: 8,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-1)',
+            fontSize: 12,
+          },
+        },
+        h('div', { style: { fontWeight: 600 } }, tr('cpu.title')),
+        h('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, line),
+        cpu.detail ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, cpu.detail) : null,
+        typeof cpu.memTotal === 'number'
+          ? h('div', { style: { color: 'var(--dsw-alias-label-secondary)', fontVariantNumeric: 'tabular-nums' } },
+            tr('cpu.mem', { free: formatMiB(cpu.memFree), total: formatMiB(cpu.memTotal) }))
+          : null,
+        cpu.processes && cpu.processes.length > 0
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 } },
+              h('span', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('cpu.proc')),
+              ...cpu.processes.slice(0, props.limit ?? 8).map((process, index) => h(
+                'div',
+                {
+                  key: `${process.command}-${index}`,
+                  style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+                },
+                `${process.user} · ${process.command || '?'}`
+                  + (typeof process.cpuPercent === 'number' ? ` · ${process.cpuPercent}%` : ''),
+              )),
+            )
+          : null,
+      )
+    }
+
     /** The loading state: a turning ring plus one line, so a switch never reads as a failure. */
     function Loading(props) {
       const label = props.label || tr('loading')
@@ -1010,7 +1132,11 @@ window.__ModuleLoader__.load({
             snapshot.hint ? h('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, snapshot.hint) : null,
           )
         }
+        const cpuDevice = snapshot.cpu && snapshot.cpu.memoryKind === 'unified'
         if (!snapshot.gpus || snapshot.gpus.length === 0) {
+          // A unified-memory machine DID answer the GPU question; the CPU card
+          // below says so in memory terms instead of "no GPU".
+          if (cpuDevice) return h(CpuCard, { cpu: snapshot.cpu })
           const local = snapshot.local === true
           return h(
             'div',
@@ -1203,6 +1329,8 @@ window.__ModuleLoader__.load({
       const { state, reload } = useGpu('', true)
       const { snapshot, failure } = state
       const [busy, setBusy] = useState(false)
+      const [draft, setDraft] = useState(() => settingsDraft.get())
+      useEffect(() => settingsDraft.subscribe(setDraft), [])
 
       const row = (label, value) => h(
         'div',
@@ -1234,7 +1362,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 } },
-        h('div', { style: { fontWeight: 600 } }, tr('settings.heading')),
+        h('div', { style: { fontWeight: 600 } }, h(SettingsLabel, null)),
         row(tr('settings.status'), h('span', { style: { color: statusColor } }, statusText)),
         row(tr('settings.workspace'), snapshot && snapshot.target
           ? (snapshot.target.kind === 'local' ? tr('target.local') : tr('target.remote'))
@@ -1333,14 +1461,42 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
+        snapshot && snapshot.cpu ? h(CpuCard, { cpu: snapshot.cpu }) : null,
+        h(
+          'label',
+          {
+            style: {
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: '6px 0',
+              cursor: 'pointer',
+            },
+          },
+          h('input', {
+            type: 'checkbox',
+            checked: draft.showCpu === true,
+            onChange: (event) => settingsDraft.setShowCpu(event.target.checked),
+            style: { marginTop: 2, flex: 'none' },
+          }),
+          h(
+            'span',
+            { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+            h('span', null, tr('cpu.show')),
+            h('span', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 } }, tr('cpu.hint')),
+          ),
+        ),
         h(
           'button',
           {
             type: 'button',
             disabled: busy,
             onClick: () => {
+              const pending = settingsDraft.get().dirty
+              settingsDraft.commit()
               setBusy(true)
               void reload().finally(() => setBusy(false))
+              if (pending) toast(tr('settings.saved'))
             },
             style: {
               alignSelf: 'flex-start',
@@ -1355,6 +1511,56 @@ window.__ModuleLoader__.load({
           },
           busy ? tr('settings.refreshing') : tr('settings.refresh'),
         ),
+      )
+    }
+
+    /** Announce a saved switch without leaving the page (one line, fades out). */
+    function toast(text) {
+      const node = document.createElement('div')
+      node.textContent = text
+      node.setAttribute('role', 'status')
+      node.style.cssText = [
+        'position:fixed', 'left:50%', 'bottom:32px', 'transform:translateX(-50%)',
+        'z-index:2147483000', 'padding:6px 14px', 'border-radius:999px', 'font-size:12px',
+        'background:var(--dsw-alias-bg-layer-3, rgba(40,40,40,0.92))',
+        'color:var(--dsw-alias-label-primary, #fff)',
+        'box-shadow:0 4px 16px rgba(0,0,0,0.18)',
+        'transition:opacity 200ms ease', 'opacity:1',
+      ].join(';')
+      document.body.appendChild(node)
+      setTimeout(() => {
+        node.style.opacity = '0'
+        setTimeout(() => node.remove(), 250)
+      }, 1600)
+    }
+
+    /** The settings page label: an SVG panel mark next to the localized title. */
+    function SettingsLabel() {
+      return h(
+        'span',
+        { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+        h(
+          'svg',
+          {
+            width: 14,
+            height: 14,
+            viewBox: '0 0 16 16',
+            'aria-hidden': 'true',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.4,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            style: { flex: 'none' },
+          },
+          h('rect', { x: 1.5, y: 2.5, width: 13, height: 11, rx: 2.2 }),
+          h('path', { d: 'M4.4 10.6V8.2' }),
+          h('path', { d: 'M7.2 10.6V5.4' }),
+          h('path', { d: 'M10 10.6V9.2' }),
+          h('path', { d: 'M10.4 5.2H13.2' }),
+          h('path', { d: 'M12.1 4.1L13.2 5.2L12.1 6.3' }),
+        ),
+        h('span', null, tr('settings.title')),
       )
     }
 
@@ -1401,7 +1607,7 @@ window.__ModuleLoader__.load({
               name: 'settings.section',
               id: 'dsh-remote-gpu-switch',
               order: 41,
-              label: () => tr('settings.title'),
+              label: () => h(SettingsLabel, { key: 'label' }),
             },
             () => h(GpuSettingsPage, null),
           )),

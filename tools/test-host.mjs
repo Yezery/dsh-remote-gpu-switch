@@ -89,8 +89,10 @@ apply(ctx, { intervalMs: 60000, commandTimeoutMs: 5000 })
 assert.equal(routes.length, 1, 'one GPU route is registered')
 const route = routes[0]
 
-async function query(sessionId) {
-  const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
+async function query(sessionId, params = {}) {
+  const search = new URLSearchParams(params)
+  if (sessionId) search.set('sessionId', sessionId)
+  const suffix = search.toString() ? `?${search}` : ''
   const req = { url: `/dsh-remote-gpu-switch/gpu${suffix}`, headers: {} }
   let body = ''
   const res = {
@@ -103,16 +105,26 @@ async function query(sessionId) {
 }
 
 try {
-  // LOCAL workspace: runs on this machine; with no GPU tool that is a clean
-  // "ok, no backend" sample rather than an error.
-  const local = await query('s-local')
+  // LOCAL workspace: runs on this machine; whatever this host has (an Apple
+  // unified-memory device, a discrete card, or nothing) is an "ok" sample —
+  // never a probe failure.
+  const local = await query('s-local', { cpu: '1' })
   assert.equal(local.target.kind, 'local')
   assert.equal(local.local, true)
   assert.equal(local.status, 'ok')
-  assert.equal(local.gpus.length, 0)
-  assert.ok(local.error === 'no-gpu-backend' || local.error === 'no-gpu-visible',
-    `expected a no-GPU reason, got ${local.error}`)
+  if (local.gpus.length === 0) {
+    assert.ok(local.error === 'no-gpu-backend' || local.error === 'no-gpu-visible',
+      `expected a no-GPU reason, got ${local.error}`)
+  }
   assert.equal(remoteCalls, 0, 'a local workspace must not call rw_exec')
+  // The CPU fallback asked for: this Mac answers "unified memory", a Linux box
+  // with an NVIDIA card answers "no VRAM", a boxless CPU answers "none".
+  assert.ok(local.cpu, 'a cpu=1 request must carry the CPU reading')
+  assert.ok(['unified', 'shared', 'integrated', 'none'].includes(local.cpu.memoryKind),
+    `unexpected memory kind ${local.cpu.memoryKind}`)
+
+  // Without the flag the fallback costs nothing, even when a reading is cached.
+  assert.equal((await query('s-local', { cpu: '0' })).cpu, null)
 
   // REMOTE workspace: same display logic, but resolved through rw_exec as the
   // session's own agent so dsh-remote picks this workspace's host.

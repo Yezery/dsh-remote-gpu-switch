@@ -54,12 +54,25 @@ NVIDIA-SMI has failed because you are not running as an administrator
 ==DSHGPU temp==
 ==DSHGPU end==`
 
+// Apple Silicon answers per GPU tooling: one unified-memory row plus the
+// busiest processes, and the row is split across fields by the local shell.
+const apple = `==DSHGPU host==
+apple-node
+==DSHGPU backend==
+apple-silicon
+==DSHGPU gpus==
+Mac16,1,apple-silicon,9000,32768,1,Apple M4,10,macOS
+cpu,42.5,alice,python3 train.py
+cpu,7.0,bob,WindowServer
+==DSHGPU end==`
+
 const cases = [
   ['nvidia', nvidia, 2],
   ['rocm', rocm, 1],
   ['gpustat', gpustat, 1],
   ['none', none, 0],
   ['broken', broken, 0],
+  ['apple', apple, 1],
 ]
 
 let failures = 0
@@ -80,6 +93,21 @@ if (noisyParsed.gpus.length !== 2) {
   console.log('FAIL noisy: expected 2 gpus, got', noisyParsed.gpus.length)
 } else {
   console.log('ok   noisy: 2 gpus survived the trailing noise')
+}
+
+const appleParsed = parseGpuOutput(apple)
+const appleGpu = appleParsed.gpus[0]
+const appleOk = appleParsed.error === null
+  && appleGpu?.name === 'Mac16,1 · Apple M4 (unified · MPS/Metal)'
+  && appleGpu.memoryTotal === 32768
+  && appleGpu.memoryUsed === 32768 - 9000
+  && appleGpu.processes.length === 2
+  && appleParsed.cpu?.memoryKind === 'unified'
+if (!appleOk) {
+  failures += 1
+  console.log('FAIL apple row:', JSON.stringify(appleParsed))
+} else {
+  console.log('ok   apple: unified device + 2 processes')
 }
 
 if (splitSections(nvidia).gpus.length !== 2) {

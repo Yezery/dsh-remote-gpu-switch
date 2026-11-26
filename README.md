@@ -124,6 +124,22 @@ dsh-remote **active remote workspace** session. Local probing uses `sh`, so on
 Windows it needs Git Bash's `sh` on `PATH`; without it the panel reports a local
 probe error instead of a false "no GPU".
 
+## No GPU? The CPU fallback
+
+The panel is about GPUs first. On a machine without one it says so, and if
+**「无 GPU 时也显示 CPU / 统一内存」** is switched on (off by default) it instead reads
+the CPU and answers in memory terms:
+
+| Answer | Meaning |
+| --- | --- |
+| unified memory | CPU and GPU share it (Apple Silicon, MPS/Metal) — usable as VRAM, so a Mac is not "no GPU" |
+| shared memory | the driver reports VRAM the GPU may use |
+| integrated GPU | an integrated GPU exists but reports no VRAM the CPU can read |
+| no usable GPU | nothing to read |
+
+The switch is stored in the browser and applied on the next probe, so a GPU
+machine never pays for the CPU probe.
+
 ## Configuration
 
 `cordis.patch.yml` carries the tunables:
@@ -141,6 +157,8 @@ probe error instead of a false "no GPU".
         idleMemoryPercent: 5    # … and below this memory usage
         # command: '…'          # override the REMOTE probe command entirely
         # localCommand: '…'     # override the LOCAL probe command
+        showCpu: false          # CPU fallback when no GPU answers (the panel has a switch too)
+        cpuTopProcesses: 8      # busiest processes listed for the CPU
 ```
 
 ## Install
@@ -170,6 +188,17 @@ sh tools/check-command.sh      # probe command survives sh and bash
 ```
 
 ## Changelog
+
+### 1.3.0
+
+- Settings section is now **显卡面板 / GPU panel**, with an SVG mark beside the label.
+- **Apple Silicon is a GPU again**: without `nvidia-smi` the probe falls back to
+  `uname -s` = Darwin and reports one **unified memory** device (Apple's reclaimable
+  memory as free), shown in the same panel — a Mac is no longer "no GPU".
+- The **CPU fallback** is a new switch, **off by default**, so GPU machines pay nothing:
+  when there is no GPU it reads the CPU and answers the honest question — unified
+  memory (Apple), shared VRAM (integrated GPU), or "no usable GPU". Enabling it saves
+  locally and commits with the toast.
 
 ### 1.2.3
 
