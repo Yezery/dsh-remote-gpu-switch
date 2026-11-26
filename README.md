@@ -138,7 +138,8 @@ the CPU and answers in memory terms:
 | no usable GPU | nothing to read |
 
 The switch is stored in the browser and applied on the next probe, so a GPU
-machine never pays for the CPU probe.
+machine never pays for the CPU probe. The CPU view reads memory only: it does not
+sample processes, so there is no per-user or per-process list for a CPU.
 
 ## Configuration
 
@@ -158,7 +159,6 @@ machine never pays for the CPU probe.
         # command: '…'          # override the REMOTE probe command entirely
         # localCommand: '…'     # override the LOCAL probe command
         showCpu: false          # CPU fallback when no GPU answers (the panel has a switch too)
-        cpuTopProcesses: 8      # busiest processes listed for the CPU
 ```
 
 ## Install
@@ -188,6 +188,11 @@ sh tools/check-command.sh      # probe command survives sh and bash
 ```
 
 ## Changelog
+
+### 1.3.1
+
+- The CPU fallback reads memory and cores only; it no longer samples processes, so a CPU
+  view has no user or process list (and costs no `ps` scan per poll).
 
 ### 1.3.0
 

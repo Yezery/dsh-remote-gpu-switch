@@ -63,7 +63,6 @@ window.__ModuleLoader__.load({
       'cpu.kind.integrated': '核显：存在集成显卡，但驱动未报告可用显存',
       'cpu.kind.none': '没有可用 GPU',
       'cpu.mem': '内存 {free} / {total}',
-      'cpu.proc': '占用最多的进程',
       'settings.idle': '空闲显卡',
       'settings.workspace': '工作区',
       'settings.machine': '所属主机',
@@ -126,7 +125,6 @@ window.__ModuleLoader__.load({
       'cpu.kind.integrated': 'Integrated GPU: present, but its driver reports no VRAM to read',
       'cpu.kind.none': 'No usable GPU',
       'cpu.mem': 'memory {free} / {total}',
-      'cpu.proc': 'Busiest processes',
       'settings.idle': 'Idle GPUs',
       'settings.workspace': 'Workspace',
       'settings.machine': 'Host',
@@ -992,22 +990,6 @@ window.__ModuleLoader__.load({
         typeof cpu.memTotal === 'number'
           ? h('div', { style: { color: 'var(--dsw-alias-label-secondary)', fontVariantNumeric: 'tabular-nums' } },
             tr('cpu.mem', { free: formatMiB(cpu.memFree), total: formatMiB(cpu.memTotal) }))
-          : null,
-        cpu.processes && cpu.processes.length > 0
-          ? h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 } },
-              h('span', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('cpu.proc')),
-              ...cpu.processes.slice(0, props.limit ?? 8).map((process, index) => h(
-                'div',
-                {
-                  key: `${process.command}-${index}`,
-                  style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-                },
-                `${process.user} · ${process.command || '?'}`
-                  + (typeof process.cpuPercent === 'number' ? ` · ${process.cpuPercent}%` : ''),
-              )),
-            )
           : null,
       )
     }

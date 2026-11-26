@@ -95,8 +95,6 @@ const DEFAULTS = {
   // CPU (unified-memory) fallback when no GPU answers. Off by default: this panel
   // is about GPUs first, so the CPU costs nothing until asked for.
   showCpu: false,
-  // Processor rows kept from the snapshot (a box runs thousands; they are not GPUs).
-  cpuTopProcesses: 8,
 }
 
 /**
@@ -139,7 +137,6 @@ function resolveSettings(config) {
     // Remote-only overrides must not leak into the local probe (and vice versa).
     localCommand: custom(raw.localCommand) ? raw.localCommand : DEFAULT_COMMAND,
     showCpu: raw.showCpu === true,
-    cpuTopProcesses: number(raw.cpuTopProcesses, DEFAULTS.cpuTopProcesses, 1, 50),
   }
 }
 
@@ -488,7 +485,6 @@ export function apply(ctx, config) {
             // GPU reading (unified memory, "no VRAM") and never replaces it.
             const cpuResult = await probeCpu({
               timeoutMs: Math.min(settings.commandTimeoutMs, 5000),
-              topProcesses: settings.cpuTopProcesses,
               maxMemoryMiB: null,
             })
             cpu = cpuResult.cpu
