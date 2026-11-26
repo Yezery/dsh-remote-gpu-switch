@@ -1607,7 +1607,9 @@ window.__ModuleLoader__.load({
               name: 'settings.section',
               id: 'dsh-remote-gpu-switch',
               order: 41,
-              label: () => h(SettingsLabel, { key: 'label' }),
+              // A string, not a node: the settings shell already draws a row
+              // icon, so a node here showed the mark twice.
+              label: () => tr('settings.title'),
             },
             () => h(GpuSettingsPage, null),
           )),
