@@ -12,12 +12,14 @@
       name: dsh-remote-gpu-switch
       config:
         # How often the host re-probes the current workspace's GPU (ms).
-        intervalMs: 3000
+        # A status chip wants seconds, not a CPU cycle: 8 s is plenty, and
+        # polling stops entirely while no panel is watching (idleStopMs).
+        intervalMs: 8000
         # Upper bound for one probe, local or remote (ms).
         commandTimeoutMs: 15000
         # Stop probing this long after the last client asked (ms); 0 keeps polling.
-        idleStopMs: 120000
-        # How many samples the client-side sparkline keeps.
-        historyLength: 90
+        idleStopMs: 60000
+        # How many samples the client-side sparkline keeps (20 × 8 s ≈ 2.6 min).
+        historyLength: 20
         # command: '…'       # override the REMOTE probe command
         # localCommand: '…'  # override the LOCAL probe command

@@ -150,10 +150,10 @@ sample processes, so there is no per-user or per-process list for a CPU.
     - id: dsh-remote-gpu-switch
       name: dsh-remote-gpu-switch
       config:
-        intervalMs: 3000        # refresh cadence (500 – 300000)
+        intervalMs: 8000        # refresh cadence (500 – 300000)
         commandTimeoutMs: 15000 # probe timeout (local or remote)
-        idleStopMs: 120000      # stop probing a machine after no panel asked for it
-        historyLength: 90       # samples kept for the sparkline
+        idleStopMs: 60000       # stop probing a machine after no panel asked for it
+        historyLength: 20       # samples kept for the sparkline
         idleUtilPercent: 10     # a card is free below this utilization …
         idleMemoryPercent: 5    # … and below this memory usage
         # command: '…'          # override the REMOTE probe command entirely
@@ -188,6 +188,12 @@ sh tools/check-command.sh      # probe command survives sh and bash
 ```
 
 ## Changelog
+
+### 1.3.5
+
+- **Lighter by default**: cadence 3 s → 8 s, idle stop 2 min → 1 min, sparkline 90 → 20
+  samples. Polling also pauses while the browser tab is hidden and the pane is closed, and
+  resumes with one immediate read. Nothing samples processes on the CPU path.
 
 ### 1.3.4
 

@@ -75,10 +75,10 @@ const DEFAULT_COMMAND = [
 ].join(' ')
 
 const DEFAULTS = {
-  intervalMs: 3000,
+  intervalMs: 8000,
   commandTimeoutMs: 15000,
-  idleStopMs: 120000,
-  historyLength: 90,
+  idleStopMs: 60000,
+  historyLength: 20,
   idleUtilPercent: 10,
   idleMemoryPercent: 5,
   // CPU (unified-memory) fallback when no GPU answers. Off by default: this panel

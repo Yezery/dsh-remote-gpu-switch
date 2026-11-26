@@ -644,13 +644,26 @@ window.__ModuleLoader__.load({
      */
     function useGpu(sessionId, active) {
       const key = sessionId ? String(sessionId) : ''
+      // A background browser tab is not watching either: no timer, no probes.
+      const [pageVisible, setPageVisible] = useState(() => (
+        typeof document === 'undefined' ? true : document.visibilityState !== 'hidden'
+      ))
+      useEffect(() => {
+        if (typeof document === 'undefined') return undefined
+        const onChange = () => setPageVisible(document.visibilityState !== 'hidden')
+        document.addEventListener('visibilitychange', onChange)
+        return () => document.removeEventListener('visibilitychange', onChange)
+      }, [])
       const [state, setState] = useState(() => storeFor(key).get())
       useEffect(() => {
         const store = storeFor(key)
         setState(store.get())
-        if (active === false) return undefined
+        if (active === false || !pageVisible) return undefined
+        // A surface that was paused (hidden tab, closed pane) resumes with one
+        // immediate read instead of waiting a full cadence.
+        void store.refresh()
         return store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
-      }, [key, active])
+      }, [key, active, pageVisible])
       return { state, reload: () => storeFor(key).refresh() }
     }
 
