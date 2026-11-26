@@ -16,7 +16,7 @@ GPU view always lands on the same host as the session's `rw_*` tools.
 | Seat | What it shows |
 | --- | --- |
 | Conversation header chip | `空闲 {idle}/{total}` for the current workspace's host (green = all free, amber = some free, red = none). Local workspace without a GPU shows `无 GPU` in muted grey. The tooltip names the machine and the users currently on it. Click to open the panel. |
-| Right sidebar tab `显卡` | Every GPU of that host in detail: name, utilization %, memory used/total, temperature, **the user who owns the task running on it** (`占用 <user>×<n>`), an `空闲` tag on free cards, the machine identity (local hostname / remote alias + address) and a sparkline of recent samples. |
+| Right sidebar tab `显卡` | Every GPU of that host in detail: name, utilization %, memory used/total, temperature, **the user who owns the task running on it** (`占用 <user>×<n>`), an `空闲` tag on free cards, the machine identity (local hostname / remote alias + address), a refresh button and a sparkline of recent samples. |
 | Settings → `显卡` | Probe status, workspace kind, machine, probed hostname, backend, idle count, refresh interval, the exact probe command, a "refresh now" button, the per-GPU process list and an "active users" summary. |
 | Host tool `remote_gpu` | The same snapshot as text for the agent, resolved from the calling session's own workspace. |
 
@@ -170,6 +170,11 @@ sh tools/check-command.sh      # probe command survives sh and bash
 ```
 
 ## Changelog
+
+### 1.2.3
+
+- The sidebar panel header carries a refresh button: one click re-reads the snapshot for the
+  workspace on screen (the icon turns while it waits).
 
 ### 1.2.2
 

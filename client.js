@@ -90,6 +90,7 @@ window.__ModuleLoader__.load({
       'gpu.local.none': '本机没有可用 GPU',
       'gpu.local.none.hint': '未找到 nvidia-smi / rocm-smi / gpustat，本机无需分配显卡。',
       'history': '最近 {count} 次采样',
+      'refresh.title': '刷新',
     }
 
     const en = {
@@ -142,6 +143,7 @@ window.__ModuleLoader__.load({
       'gpu.local.none': 'No usable GPU on this machine',
       'gpu.local.none.hint': 'No nvidia-smi / rocm-smi / gpustat was found; there is no GPU to allocate here.',
       'history': 'last {count} samples',
+      'refresh.title': 'Refresh',
     }
 
     const DICT = { zh, en }
@@ -840,6 +842,54 @@ window.__ModuleLoader__.load({
       return tr('target.unknown')
     }
 
+    /** A quiet icon button that re-reads the snapshot on demand. */
+    function RefreshButton(props) {
+      const busy = props.busy === true
+      return h(
+        'button',
+        {
+          type: 'button',
+          'aria-label': tr('refresh.title'),
+          title: tr('refresh.title'),
+          disabled: busy,
+          onClick: () => {
+            void props.onRefresh()
+          },
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 20,
+            height: 20,
+            flex: 'none',
+            padding: 0,
+            borderRadius: 5,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--dsw-alias-label-tertiary)',
+            cursor: busy ? 'default' : 'pointer',
+          },
+        },
+        h(
+          'svg',
+          {
+            className: busy ? 'dsh-rg-spin' : undefined,
+            width: 13,
+            height: 13,
+            viewBox: '0 0 16 16',
+            'aria-hidden': 'true',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.6,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          },
+          h('path', { d: 'M13.5 8a5.5 5.5 0 1 1-1.6-3.9' }),
+          h('path', { d: 'M13.5 2.5v3.2h-3.2' }),
+        ),
+      )
+    }
+
     /** The loading state: a turning ring plus one line, so a switch never reads as a failure. */
     function Loading(props) {
       const label = props.label || tr('loading')
@@ -896,6 +946,9 @@ window.__ModuleLoader__.load({
         || snapshot.status === 'loading'
         || snapshot.status === 'idle'
         || (failure && snapshot.status !== 'ok')
+      // The icon turns while a manual refresh runs; the spinner already tells
+      // the story during the first load, so only show it once a reading exists.
+      const [refreshing, setRefreshing] = useState(false)
       const waitingLabel = snapshot && snapshot.target && snapshot.target.kind === 'remote'
         ? tr('loading.remote')
         : tr('loading')
@@ -1024,6 +1077,13 @@ window.__ModuleLoader__.load({
                 { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                 `${machineLabel(snapshot)} · ${snapshot.backend}`,
               ),
+              h(RefreshButton, {
+                onRefresh: () => {
+                  setRefreshing(true)
+                  void reload().finally(() => setRefreshing(false))
+                },
+                busy: refreshing,
+              }),
             ),
             h('span', null, [
               tr('gpu.count', { count: snapshot.gpus.length }),
@@ -1074,7 +1134,8 @@ window.__ModuleLoader__.load({
 
     /** The conversation header chip: it only tells how many GPUs are free; clicking it opens the detail panel. */
     function GpuChip(props) {
-      const { snapshot } = useGpu(props.sessionId, true)
+      const { state } = useGpu(props.sessionId, true)
+      const { snapshot } = state
       const gpus = (snapshot && snapshot.gpus) || []
       const counts = idleCounts(gpus)
       if (!snapshot) return null
