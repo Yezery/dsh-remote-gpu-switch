@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Workspace GPU",
-    "description": "Live GPU utilization of the current workspace's machine: a local workspace probes this host, a remote workspace probes its dsh-remote host — per-GPU compute load, memory, temperature and owning user."
+    "description": "Free-GPU count and per-GPU utilization, memory, temperature and owning user for the current workspace's machine: a local workspace reads this host, a remote workspace reads its SSH host, and switching workspaces switches hosts. Adds a remote_gpu tool."
   }
 }

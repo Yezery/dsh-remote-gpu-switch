@@ -2,5 +2,6 @@ url: https://github.com/Yezery/dsh-remote-gpu-switch
 name: Yezery/dsh-remote-gpu-switch
 category: remote
 description:
-  en: Shows how many GPUs are free on the machine the current workspace belongs to — locally or through dsh-remote — in the conversation header, and per-GPU utilization, memory, temperature and the owning user in a right-sidebar panel. Switching workspaces switches hosts; a local machine without a GPU says so explicitly. Adds a remote_gpu tool that returns the same snapshot.
-  zh: 按当前工作区所属主机显示空闲显卡数量：本地工作区看本机，远程工作区看对应 SSH 主机，切换工作区即切换主机；本地无 GPU 时明确提示。右侧边栏展示每张卡的利用率、显存、温度与占用用户，并提供返回同一快照的 remote_gpu 工具。
+  en: Shows the free GPUs of the machine the current workspace belongs to — this host for a local workspace, the bound SSH host for a remote one, so switching workspaces switches hosts — with per-GPU utilization, memory, temperature and owning user in the conversation header and a right-sidebar panel, plus a remote_gpu tool. Handles NVIDIA, ROCm, gpustat and Apple Silicon, and an optional CPU / unified-memory view.
+  zh: 按当前工作区所属主机显示空闲显卡数量与每张卡的利用率、显存、温度、占用用户：本地工作区看本机，远程工作区看对应 SSH 主机，切换工作区即切换主机；顶栏与右侧边栏展示，并提供 remote_gpu 工具。支持 NVIDIA、ROCm、gpustat 与 Apple Silicon（统一内存），另有可选的 CPU / 统一内存视图。
+icon: https://raw.githubusercontent.com/Yezery/dsh-remote-gpu-switch/main/assets/icon-180.png

@@ -1,18 +1,23 @@
 {
   "name": "dsh-remote-gpu-switch",
-  "version": "1.3.9",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "description": "Shows the free GPUs of the current workspace's machine — local or dsh-remote host — with per-GPU utilization, memory, temperature and the owning user.",
+  "description": "Shows the free GPUs of the machine the current workspace belongs to — this host for a local workspace, the bound SSH host for a remote one — with per-GPU utilization, memory, temperature and owning user, plus a remote_gpu tool.",
   "keywords": [
     "dsh-plugin",
     "dsh",
     "gpu",
     "nvidia",
+    "rocm",
+    "apple-silicon",
+    "mps",
+    "cuda",
     "local",
     "remote",
     "workspace",
-    "monitoring"
+    "monitoring",
+    "dsh-remote"
   ],
   "homepage": "https://github.com/Yezery/dsh-remote-gpu-switch",
   "repository": {
@@ -31,7 +36,9 @@
     "lib",
     "cordis.patch.yml",
     "locale",
-    "icon.svg"
+    "icon.svg",
+    "assets",
+    "README.md"
   ],
   "dsh": {
     "bundle": {
