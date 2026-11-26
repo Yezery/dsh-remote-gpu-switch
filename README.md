@@ -189,6 +189,12 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.3
+
+- The settings navigation row shows the plugin's own mark: the icon registers through
+  `settings.section.icon` (addressed by the section id), which is what replaces the
+  shell's default glyph. A node in the section label only drew a second glyph.
+
 ### 1.3.2
 
 - The CPU view no longer repeats an integrated GPU as a GPU card with a user/process list:

@@ -1521,16 +1521,23 @@ window.__ModuleLoader__.load({
       }, 1600)
     }
 
-    /** The settings page label: an SVG panel mark next to the localized title. */
-    function SettingsLabel() {
+    /**
+     * The settings navigation icon: an SVG panel mark.
+     *
+     * Registering an icon (not a label) is what replaces the shell's default
+     * glyph — a node in `label` merely drew a second mark beside it. The shell
+     * passes `size` and `active`, so the mark follows the row's geometry.
+     */
+    function SettingsIcon(props) {
+      const size = Number(props && props.size) || 16
       return h(
         'span',
-        { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+        { style: { display: 'inline-flex', alignItems: 'center' } },
         h(
           'svg',
           {
-            width: 14,
-            height: 14,
+            width: size,
+            height: size,
             viewBox: '0 0 16 16',
             'aria-hidden': 'true',
             fill: 'none',
@@ -1547,6 +1554,15 @@ window.__ModuleLoader__.load({
           h('path', { d: 'M10.4 5.2H13.2' }),
           h('path', { d: 'M12.1 4.1L13.2 5.2L12.1 6.3' }),
         ),
+      )
+    }
+
+    /** The settings page heading: the same mark beside the localized title. */
+    function SettingsLabel() {
+      return h(
+        'span',
+        { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+        h(SettingsIcon, { size: 14 }),
         h('span', null, tr('settings.title')),
       )
     }
@@ -1594,13 +1610,21 @@ window.__ModuleLoader__.load({
               name: 'settings.section',
               id: 'dsh-remote-gpu-switch',
               order: 41,
-              // A string, not a node: the settings shell already draws a row
-              // icon, so a node here showed the mark twice.
               label: () => tr('settings.title'),
             },
             () => h(GpuSettingsPage, null),
           )),
           'dsh-remote-gpu-switch.settings',
+        )
+
+        // The nav row's icon, addressed by the section id; without this the
+        // shell keeps its own default glyph.
+        inner.effect(
+          () => slots.inject('settings.section.icon', () => slots.register(
+            { name: 'settings.section.icon', id: 'dsh-remote-gpu-switch', order: 41 },
+            SettingsIcon,
+          )),
+          'dsh-remote-gpu-switch.settings-icon',
         )
       })
 
