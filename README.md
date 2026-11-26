@@ -137,8 +137,9 @@ the CPU and answers in memory terms:
 | integrated GPU | an integrated GPU exists but reports no VRAM the CPU can read |
 | no usable GPU | nothing to read |
 
-The switch is stored in the browser and applied on the next probe, so a GPU
-machine never pays for the CPU probe. The CPU view reads memory only: it does not
+Both switches are stored in the browser and applied on the next probe. With auto
+sampling off nothing probes on a timer; the side panel's refresh button takes one
+reading by hand. The CPU view reads memory only: it does not
 sample processes, so there is no per-user or per-process list for a CPU.
 
 ## Configuration
@@ -189,6 +190,13 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.9
+
+- The switch is **自动采集 / Auto sampling**, and it pauses the cadence only: with it off
+  nothing probes on a timer, while the side panel's refresh button (and the agent tool)
+  still take one reading by hand. The chip turns muted (`GPU ⏸`) so a held sample is
+  never mistaken for a live one.
+
 ### 1.3.8
 
 - Settings → 显卡面板 puts the switches **at the top**, drawn as switches (native checkbox
@@ -196,10 +204,10 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ### 1.3.7
 
-- Settings → **显卡面板** gains a **sampling master switch**. Turning it off stops every
-  timer and every probe on the host, keeps the last reading on screen, and says so
-  (`GPU ⏸`, a paused panel). The agent tool answers "paused" instead of probing.
-  Stored in the browser like the CPU switch.
+- Settings → **显卡面板** gains an **自动采集 / Auto sampling** switch. Turning it off stops
+  the timer-driven probing only; a reading you ask for by hand (the side panel's
+  refresh button, or the agent tool) still works. The chip turns muted and says
+  `GPU ⏸` so nobody mistakes a stale number for a live one.
 
 ### 1.3.5
 

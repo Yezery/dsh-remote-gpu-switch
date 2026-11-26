@@ -145,14 +145,16 @@ try {
   assert.equal(remote.idle.total, 2)
   assert.equal(remote.idle.count, 1)
 
-  // Paused keeps the last reading; sampling resumes once allowed again.
-  const pausedAgain = await query('s-remote', { sampling: '0' })
-  assert.equal(pausedAgain.gpus.length, 2, 'the last reading is still served while paused')
-  const resumed = await query('s-remote', { sampling: '1' })
-  assert.equal(resumed.sampling, true)
-  // The sample from a second ago still counts, so resuming may serve it as-is;
-  // what matters is that the switch itself changes and a stale sample refreshes.
-  assert.ok(resumed.gpus.length > 0)
+  // Auto sampling off stops the CADENCE, not a reading the user asked for: a
+  // refresh request still probes, a later poll of the same machine serves it.
+  const autoOff = await query('s-remote', { auto: '0' })
+  assert.equal(autoOff.autoSampling, false)
+  const callsAfterOff = remoteCalls
+  const secondPoll = await query('s-remote', { auto: '0' })
+  assert.equal(remoteCalls, callsAfterOff, 'with auto off, a repeat poll must not probe')
+  assert.equal(secondPoll.gpus.length, 2)
+  const resumed = await query('s-remote', { auto: '1' })
+  assert.equal(resumed.autoSampling, true)
 
   // Settings (no session): the last viewed machine, not an unrelated active host.
   const settings = await query('')

@@ -55,9 +55,9 @@ window.__ModuleLoader__.load({
       'settings.status.error': '探测失败',
       'settings.status.idle': '等待探测',
       'settings.status.loading': '正在探测…',
-      'sampling.show': '采集总开关',
-      'sampling.hint': '关闭后完全停止采样，不再执行任何探测命令；顶栏与面板显示上一次的结果。',
-      'sampling.off': '采集已暂停',
+      'sampling.show': '自动采集',
+      'sampling.hint': '关闭后不再自动定时探测，也不执行任何探测命令；可在侧栏面板点「刷新」手动采集一次。',
+      'sampling.off': '自动采集已关闭',
       'cpu.show': '无 GPU 时也显示 CPU / 统一内存',
       'gpu.apple.hidden': '本机没有独立显卡卡；开启下方「CPU / 统一内存」可查看 Apple 统一内存。',
       'cpu.hint': '默认关闭。开启后会读取 CPU 与统一内存（如 Apple MPS），显示在下方；GPU 仍然优先。',
@@ -121,9 +121,9 @@ window.__ModuleLoader__.load({
       'settings.status.error': 'Probe failed',
       'settings.status.idle': 'Waiting for the first probe',
       'settings.status.loading': 'Probing…',
-      'sampling.show': 'Sampling master switch',
-      'sampling.hint': 'When off, sampling stops entirely: no probe command runs. The chip and panel keep the last reading.',
-      'sampling.off': 'Sampling paused',
+      'sampling.show': 'Auto sampling',
+      'sampling.hint': 'When off, nothing probes on a timer and no probe command runs; use Refresh in the side panel to take one reading by hand.',
+      'sampling.off': 'Auto sampling is off',
       'cpu.show': 'Also show CPU / unified memory when there is no GPU',
       'gpu.apple.hidden': 'No discrete GPU card here; turn on "CPU / unified memory" to see Apple unified memory.',
       'cpu.hint': 'Off by default. When on, reads the CPU and its unified memory (e.g. Apple MPS) and shows it below; the GPU still comes first.',
@@ -592,7 +592,7 @@ window.__ModuleLoader__.load({
         state.refreshing = true
         try {
           const { showCpu, sampling } = settingsDraft.get()
-          const query = `?cpu=${showCpu ? '1' : '0'}${sampling === false ? '&sampling=0' : ''}`
+          const query = `?cpu=${showCpu ? '1' : '0'}${sampling === false ? '&auto=0' : ''}`
             + (key ? `&sessionId=${encodeURIComponent(key)}` : '')
           const response = await fetch(apiPath(`/dsh-remote-gpu-switch/gpu${query}`), {
             headers: { accept: 'application/json' },
@@ -1266,7 +1266,7 @@ window.__ModuleLoader__.load({
           )
         }
         const cpuDevice = snapshot.cpu && snapshot.cpu.memoryKind === 'unified'
-        if (snapshot.sampling === false) {
+        if (snapshot.autoSampling === false && snapshot.updatedAt === 0) {
           return h(
             'div',
             { style: { padding: 12, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
@@ -1412,7 +1412,7 @@ window.__ModuleLoader__.load({
       const gpus = (snapshot && snapshot.gpus) || []
       const counts = idleCounts(gpus)
       if (!snapshot) return null
-      const paused = snapshot.sampling === false
+      const paused = snapshot.autoSampling === false
       const pending = !paused && (snapshot.status === 'loading' || snapshot.status === 'idle')
       const hidden = !pending && snapshot.status === 'ok'
         && counts.total === 0 && snapshot.backend === 'apple-silicon' && !snapshot.cpu
