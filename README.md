@@ -111,9 +111,19 @@ The view is a status indicator, so it stays cheap and says when it is stale:
 | Panel closed / browser tab hidden | Polling pauses; a returning surface re-reads only when its cached sample is older than 20 s. |
 | `idleStopMs` (default 30 s) | A machine stops being probed this long after the last client asked for it. |
 | `intervalMs` (default 15 s) | Cadence while something is watching. |
+| Stalled poll | A mounted surface keeps a 5 s watchdog, so a paused or stale cadence re-arms itself instead of waiting for a manual refresh. |
 
 One local probe is a single `sh` call (roughly 10–20 ms); one remote probe is one `rw_exec`
-over dsh-remote's existing connection.
+over dsh-remote's existing connection. Both switches live at the top of the settings page and
+are stored in the browser, so they need no host restart:
+
+| Auto sampling | CPU / unified memory | What it costs |
+| --- | --- | --- |
+| on | off | the default: one probe per cadence while something watches |
+| on | on | one extra CPU/memory read per probe, no process scan |
+| off | either | nothing on a timer; a refresh button or the agent tool takes one reading |
+
+A GPU machine never runs the CPU probe, and a paused machine never runs anything.
 
 ## Motion
 
@@ -192,7 +202,26 @@ node tools/test-host.mjs       # local / remote / settings / auto-sampling routi
 sh tools/check-command.sh      # the probe command survives sh and bash
 ```
 
+## Layout
+
+| Path | What lives there |
+| --- | --- |
+| `index.js` | host half: workspace→machine resolution, per-machine samples, the probe, the HTTP route and the `remote_gpu` tool |
+| `client.js` | browser half: chip, sidebar panel, settings page, the pollers and their switches |
+| `lib/gpu-parse.js` | marker-section parser, backends and the wire shape |
+| `lib/workspace-target.js` | session cwd → dsh-remote mirror origin |
+| `lib/cpu-probe.js` | the optional CPU / unified-memory reading |
+| `lib/http-transport.js` | route registration (Host web server + Connection Fetch) |
+| `icon.svg`, `assets/` | the plugin mark and its raster copies for the market card |
+| `market-entry/` | the catalog entry submitted upstream |
+| `cordis.patch.yml` | the plugin row and its tunables |
+
 ## Changelog
+
+### 1.4.2
+
+- README caught up with the code: the watchdog row in *Cost and controls*, a table of what the
+  two switches cost together, and a *Layout* section mapping every file to its job.
 
 ### 1.4.1
 
