@@ -1393,6 +1393,7 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { color: TONE.danger } }, tr('error.fetch', { message: failure }))
           : null,
         snapshot && snapshot.gpus && snapshot.gpus.length > 0
+          && !(snapshot.cpu && snapshot.cpu.memoryKind !== 'none')
           ? h(
               'div',
               { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
@@ -1443,7 +1444,11 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
-        snapshot && snapshot.cpu ? h(CpuCard, { cpu: snapshot.cpu }) : null,
+        // The CPU fallback already speaks for an integrated GPU; the GPU cards
+        // would repeat it with a process/user list this view does not sample.
+        snapshot && snapshot.cpu && snapshot.cpu.memoryKind !== 'none'
+          ? h(CpuCard, { cpu: snapshot.cpu })
+          : null,
         h(
           'label',
           {

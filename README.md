@@ -189,6 +189,11 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.2
+
+- The CPU view no longer repeats an integrated GPU as a GPU card with a user/process list:
+  when the fallback answers, the panel shows the memory answer only.
+
 ### 1.3.1
 
 - The CPU fallback reads memory and cores only; it no longer samples processes, so a CPU
