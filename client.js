@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
       'settings.status.ok': '正常',
       'settings.status.error': '探测失败',
       'settings.status.idle': '等待探测',
+      'settings.status.loading': '正在探测…',
       'settings.idle': '空闲显卡',
       'settings.workspace': '工作区',
       'settings.machine': '所属主机',
@@ -67,6 +68,8 @@ window.__ModuleLoader__.load({
       'settings.empty': '该主机上没有检测到显卡。',
       'settings.hint': '提示',
       'loading': '正在探测显卡…',
+      'loading.remote': '正在连接该工作区的主机…',
+      'error.retry': '重试',
       'error.fetch': '无法连接宿主服务：{message}',
       'error.remote': '显卡探测失败',
       'target.local': '本机',
@@ -103,6 +106,7 @@ window.__ModuleLoader__.load({
       'settings.status.ok': 'OK',
       'settings.status.error': 'Probe failed',
       'settings.status.idle': 'Waiting for the first probe',
+      'settings.status.loading': 'Probing…',
       'settings.idle': 'Idle GPUs',
       'settings.workspace': 'Workspace',
       'settings.machine': 'Host',
@@ -116,6 +120,8 @@ window.__ModuleLoader__.load({
       'settings.empty': 'No GPU was detected on this host.',
       'settings.hint': 'Hint',
       'loading': 'Probing the GPU…',
+      'loading.remote': 'Connecting to this workspace\'s host…',
+      'error.retry': 'Retry',
       'error.fetch': 'Cannot reach the host service: {message}',
       'error.remote': 'GPU probe failed',
       'target.local': 'Local',
@@ -183,11 +189,13 @@ window.__ModuleLoader__.load({
 .dsh-rg-dot { transition: background-color 520ms ease; }
 .dsh-rg-live { animation: dsh-rg-pulse 2.2s ease-in-out infinite; }
 @keyframes dsh-rg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.dsh-rg-spin { animation: dsh-rg-rotate 900ms linear infinite; }
+@keyframes dsh-rg-rotate { to { transform: rotate(360deg); } }
 .dsh-rg-skeleton { position: relative; overflow: hidden; background: var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.18)); border-radius: 8px; }
 .dsh-rg-skeleton::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--dsw-alias-bg-layer-3, rgba(255,255,255,0.14)), transparent); transform: translateX(-100%); animation: dsh-rg-sheen 1.6s ease-in-out infinite; }
 @keyframes dsh-rg-sheen { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) {
-  .dsh-rg-card, .dsh-rg-live, .dsh-rg-skeleton::after { animation: none !important; }
+  .dsh-rg-card, .dsh-rg-live, .dsh-rg-spin, .dsh-rg-skeleton::after { animation: none !important; }
   .dsh-rg-bar-fill, .dsh-rg-dot { transition: none !important; }
 }
 `
@@ -468,12 +476,13 @@ window.__ModuleLoader__.load({
       if (store) return store
 
       const subscribers = new Set()
-      const state = { snapshot: null, failure: null, timer: null, refreshing: false }
+      const state = { snapshot: null, failure: null, timer: null, refreshing: false, failures: 0 }
 
-      const notify = () => {
+      /** Tell every mounted surface; the third argument marks a source change worth re-reading. */
+      const notify = (changed = false) => {
         for (const subscriber of Array.from(subscribers)) {
           try {
-            subscriber(state.snapshot, state.failure)
+            subscriber(state.snapshot, state.failure, changed)
           } catch (error) {
             console.warn('[dsh-remote-gpu-switch] subscriber failed:', error)
           }
@@ -491,11 +500,13 @@ window.__ModuleLoader__.load({
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
           state.snapshot = await response.json()
           state.failure = null
+          state.failures = 0
         } catch (error) {
           state.failure = error instanceof Error ? error.message : String(error)
+          state.failures += 1
         } finally {
           state.refreshing = false
-          notify()
+          notify(true)
         }
       }
 
@@ -503,8 +514,12 @@ window.__ModuleLoader__.load({
         if (state.timer !== null) clearTimeout(state.timer)
         state.timer = null
         if (subscribers.size === 0) return
-        const interval = Number(state.snapshot && state.snapshot.intervalMs)
-        const delay = Number.isFinite(interval) && interval >= 1000 ? interval : 3000
+        const base = intervalOf(state, 3000)
+        // One rejected request (a refused probe, a hiccup) must not leave the
+        // panel broken until the user notices: retry with a bounded back-off.
+        const delay = state.failures > 0
+          ? Math.min(base * 2 ** state.failures, 30000)
+          : base
         state.timer = setTimeout(() => {
           void refresh().then(schedule)
         }, delay)
@@ -532,9 +547,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The advertised cadence of one poller: the host interval once a snapshot
+     * arrived, otherwise a conservative default.
+     * @param {{snapshot: object|null}} state - poller state.
+     * @param {number} fallback - default when no interval is known.
+     * @returns {number} milliseconds.
+     */
+    function intervalOf(state, fallback) {
+      const interval = Number(state.snapshot && state.snapshot.intervalMs)
+      return Number.isFinite(interval) && interval >= 1000 ? interval : fallback
+    }
+
+    /**
      * Subscribe a component to its workspace's poller.
      * @param {string} sessionId - the workspace's session, or '' for settings.
      * @param {boolean} active - whether the surface is on screen.
+     * @returns {{state: object, reload: Function}} the latest reading plus a manual reload.
      */
     function useGpu(sessionId, active) {
       const key = sessionId ? String(sessionId) : ''
@@ -545,7 +573,7 @@ window.__ModuleLoader__.load({
         if (active === false) return undefined
         return store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
       }, [key, active])
-      return state
+      return { state, reload: () => storeFor(key).refresh() }
     }
 
     /**
@@ -812,13 +840,68 @@ window.__ModuleLoader__.load({
       return tr('target.unknown')
     }
 
+    /** The loading state: a turning ring plus one line, so a switch never reads as a failure. */
+    function Loading(props) {
+      const label = props.label || tr('loading')
+      return h(
+        'div',
+        {
+          style: {
+            padding: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'var(--dsw-alias-label-secondary)',
+          },
+          'aria-busy': 'true',
+          role: 'status',
+        },
+        h(
+          'svg',
+          {
+            className: 'dsh-rg-spin',
+            width: 14,
+            height: 14,
+            viewBox: '0 0 14 14',
+            'aria-hidden': 'true',
+            style: { flex: 'none' },
+          },
+          h('circle', { cx: 7, cy: 7, r: 5.5, fill: 'none', stroke: BRAND, strokeOpacity: 0.25, strokeWidth: 2 }),
+          h('circle', {
+            cx: 7,
+            cy: 7,
+            r: 5.5,
+            fill: 'none',
+            stroke: BRAND,
+            strokeWidth: 2,
+            strokeLinecap: 'round',
+            strokeDasharray: '9 40',
+          }),
+        ),
+        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, label),
+      )
+    }
+
     /** The sidebar tab body. */
     function GpuPanel(props) {
       const info = typeof props.useTabInfo === 'function' ? props.useTabInfo() : null
       const visible = info && info.tab ? info.tab.visible !== false : true
-      const { snapshot, failure } = useGpu(props.sessionId, visible)
+      const { state, reload } = useGpu(props.sessionId, visible)
+      const { snapshot, failure } = state
+      // A switch starts a probe: the host says "loading" while it runs. When the
+      // request itself failed (transport), the same spinner reads better than a
+      // red card that the poller is already retrying away from.
+      const loading = !snapshot
+        || snapshot.status === 'loading'
+        || snapshot.status === 'idle'
+        || (failure && snapshot.status !== 'ok')
+      const waitingLabel = snapshot && snapshot.target && snapshot.target.kind === 'remote'
+        ? tr('loading.remote')
+        : tr('loading')
 
       const body = useMemo(() => {
+        if (loading) return h(Loading, { label: waitingLabel })
         if (failure) {
           return h(
             'div',
@@ -829,17 +912,30 @@ window.__ModuleLoader__.load({
                 color: TONE.danger,
                 border: '1px solid var(--dsw-alias-border-l2)',
                 borderRadius: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
               },
             },
-            tr('error.fetch', { message: failure }),
-          )
-        }
-        if (!snapshot) {
-          return h(
-            'div',
-            { style: { padding: 12, display: 'flex', flexDirection: 'column', gap: 10 } },
-            h('div', { className: 'dsh-rg-skeleton', style: { height: 14, width: '55%' } }),
-            h('div', { className: 'dsh-rg-skeleton', style: { height: 42, width: '100%' } }),
+            h('div', null, tr('error.fetch', { message: failure })),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: () => { void reload() },
+                style: {
+                  alignSelf: 'flex-start',
+                  fontSize: 12,
+                  padding: '2px 10px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  border: '1px solid var(--dsw-alias-border-l3)',
+                  background: 'transparent',
+                  color: 'var(--dsw-alias-label-primary)',
+                },
+              },
+              tr('error.retry'),
+            ),
           )
         }
         if (snapshot.status === 'error') {
@@ -955,7 +1051,7 @@ window.__ModuleLoader__.load({
             h(Sparkline, { history: snapshot.history }),
           ),
         )
-      }, [snapshot, failure])
+      }, [snapshot, failure, loading, waitingLabel, reload])
 
       return h(
         'div',
@@ -982,9 +1078,10 @@ window.__ModuleLoader__.load({
       const gpus = (snapshot && snapshot.gpus) || []
       const counts = idleCounts(gpus)
       if (!snapshot) return null
-      const failed = snapshot.status !== 'ok'
-      const noGpu = !failed && snapshot.local === true && counts.total === 0
-      const tone = failed ? 'danger' : noGpu ? 'muted' : idleTone(counts)
+      const pending = snapshot.status === 'loading' || snapshot.status === 'idle'
+      const failed = !pending && snapshot.status !== 'ok'
+      const noGpu = !failed && !pending && snapshot.local === true && counts.total === 0
+      const tone = pending ? 'muted' : failed ? 'danger' : noGpu ? 'muted' : idleTone(counts)
       const users = ((snapshot.users || []).map((entry) => `${entry.user}×${entry.count}`)).join(', ')
       const host = machineLabel(snapshot)
       const chipTitle = failed
@@ -1030,8 +1127,10 @@ window.__ModuleLoader__.load({
           },
         }),
         h('span', { style: { fontVariantNumeric: 'tabular-nums' } },
-          failed
-            ? 'GPU --'
+          pending
+            ? 'GPU …'
+            : failed
+              ? 'GPU --'
             : noGpu
               ? tr('chip.none')
               : tr('chip.idle', { idle: counts.idle, total: counts.total })),
@@ -1040,7 +1139,8 @@ window.__ModuleLoader__.load({
 
     /** The settings section. */
     function GpuSettingsPage() {
-      const { snapshot, failure } = useGpu('', true)
+      const { state, reload } = useGpu('', true)
+      const { snapshot, failure } = state
       const [busy, setBusy] = useState(false)
 
       const row = (label, value) => h(
@@ -1059,15 +1159,16 @@ window.__ModuleLoader__.load({
         h('span', { style: { textAlign: 'right', wordBreak: 'break-all' } }, value),
       )
 
-      const statusText = failure
+      const pending = !snapshot || snapshot.status === 'loading' || snapshot.status === 'idle'
+      const statusText = failure && !pending
         ? tr('settings.status.error')
-        : !snapshot
-          ? tr('settings.status.idle')
+        : pending
+          ? tr('settings.status.loading')
           : snapshot.status === 'ok'
             ? tr('settings.status.ok')
             : tr('settings.status.error')
 
-      const statusColor = failure || (snapshot && snapshot.status !== 'ok') ? TONE.danger : TONE.ok
+      const statusColor = pending ? TONE.muted : failure || (snapshot && snapshot.status !== 'ok') ? TONE.danger : TONE.ok
 
       return h(
         'div',
@@ -1178,7 +1279,7 @@ window.__ModuleLoader__.load({
             disabled: busy,
             onClick: () => {
               setBusy(true)
-              void storeFor('').refresh().finally(() => setBusy(false))
+              void reload().finally(() => setBusy(false))
             },
             style: {
               alignSelf: 'flex-start',

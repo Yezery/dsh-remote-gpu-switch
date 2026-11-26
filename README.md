@@ -171,6 +171,15 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.2.2
+
+- Switching workspaces shows a **spinner** ("connecting to this workspace's host") instead of a
+  red "probe failed" card that the next sample silently replaced. The host reports `loading`
+  while a remote probe runs; the chip shows `GPU …`, and a genuinely broken reading keeps a
+  retry button.
+- The panel poller retries a rejected request with a bounded back-off instead of waiting a full
+  interval, and a manual reload is available.
+
 ### 1.2.1
 
 - Remote probing calls `rw_exec`'s body directly instead of routing a batch through

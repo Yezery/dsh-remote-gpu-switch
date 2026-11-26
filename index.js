@@ -227,6 +227,7 @@ function formatSnapshot(snapshot) {
     const hint = snapshot.hint ? `\n${snapshot.hint}` : ''
     return `${where}: GPU probe failed: ${snapshot.error}${hint}`
   }
+  if (snapshot.status === 'loading') return `${where}: probing…`
   if (snapshot.status !== 'ok') return `${where}: GPU probe has not produced a sample yet.`
   if (!snapshot.gpus.length) return `${where}: no GPU visible (${snapshot.backend}).`
   const lines = [`${where} — ${snapshot.backend}`]
@@ -451,6 +452,9 @@ export function apply(ctx, config) {
         if (target.kind === 'local') {
           text = await runLocalProbe(settings.localCommand, settings.commandTimeoutMs)
         } else {
+          // A freshly switched workspace has no sample yet: report "loading"
+          // right away instead of leaving the previous reading on screen.
+          context.status = context.updatedAt === 0 ? 'loading' : context.status
           if (target.kind === 'remote' && !target.agent) {
             throw new Error('session is not live — reopen the workspace session to probe its remote host')
           }
