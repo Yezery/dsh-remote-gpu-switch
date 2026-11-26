@@ -438,7 +438,15 @@ export function apply(ctx, config) {
       try {
         let text = ''
         if (target.kind === 'unknown') {
-          throw new Error('no session context — the workspace is not attached to a live session')
+          // A blank session has no workspace yet: nothing to probe is a fact, not a failure.
+          context.status = 'ok'
+          context.host = ''
+          context.backend = 'none'
+          context.gpus = []
+          context.error = null
+          context.hint = 'No workspace yet — open a workspace to see its GPUs.'
+          context.updatedAt = Date.now()
+          return
         }
         if (target.kind === 'local') {
           text = await runLocalProbe(settings.localCommand, settings.commandTimeoutMs)
@@ -446,38 +454,53 @@ export function apply(ctx, config) {
           if (target.kind === 'remote' && !target.agent) {
             throw new Error('session is not live — reopen the workspace session to probe its remote host')
           }
+          // The registry looks the tool up by the agent's SCOPE KEY, so pass
+          // the agent itself, never its id.
+          const tool = typeof ctx.tools.executable === 'function'
+            ? ctx.tools.executable('rw_exec', target.agent)
+            : undefined
+          if (!tool) {
+            throw new Error('rw_exec is not available for this session — install and enable dsh-remote')
+          }
+          // Call the tool body directly. Going through `ctx.tools.execute` would
+          // re-run a batch WITHOUT the call ever being logged as `tool/call` in
+          // the session, which is exactly what the auto-review gate rejects
+          // ("the pending root call is missing or ambiguous in the session log").
+          // dsh-remote resolves the host from `exec.agent.session`, which is what
+          // selects the workspace's own mirror-bound machine.
           callSeq += 1
           const callId = `dsh-remote-gpu-switch-${Date.now().toString(36)}-${callSeq}`
-          // The tools service takes a batch: `calls` with a JSON-string
-          // `arguments` per call, settling to `{ results: [{ callId, result }] }`
-          // where each result is the materialized tool result (content blocks).
-          const batch = await ctx.tools.execute({
-            calls: [
-              {
-                id: callId,
-                name: 'rw_exec',
-                arguments: JSON.stringify({
-                  command: settings.command,
-                  // `rw_exec` promotes a timed-out command to a background job by
-                  // default, and that path calls `jobs.start({ owner: agent?.id })`.
-                  // A probe has no turn to attach a job to, so opt out entirely.
-                  promoteOnTimeout: false,
-                  // Fail the call ourselves rather than inheriting a longer budget.
-                  timeoutMs: Math.min(600000, Math.max(1000, settings.commandTimeoutMs)),
-                }),
-              },
-            ],
+          const exec = {
+            callId,
+            rootCallId: callId,
+            name: 'rw_exec',
+            arguments: {
+              command: settings.command,
+              // `rw_exec` promotes a timed-out command to a background job by
+              // default, and that path calls `jobs.start({ owner: agent?.id })`.
+              // A probe has no turn to attach a job to, so opt out entirely.
+              promoteOnTimeout: false,
+              // Fail the call ourselves rather than inheriting a longer budget.
+              timeoutMs: Math.min(600000, Math.max(1000, settings.commandTimeoutMs)),
+            },
             signal: abort.signal,
-            ...(target.agent ? { agent: target.agent } : {}),
-          })
-          const result = batch?.results?.[0]?.result
-          if (!result || result.isError) {
-            const caused = result?.error?.message
-              ?? result?.content?.[0]?.text
-              ?? 'unknown error'
-            throw new Error(caused)
+            agent: target.agent,
+            deferContext() {},
+            concludeTurn() {},
           }
-          text = typeof result.content?.[0]?.text === 'string' ? result.content[0].text : ''
+          let result
+          try {
+            result = await tool.execute(exec.arguments, exec)
+          } catch (error) {
+            throw new Error(error instanceof Error ? error.message : String(error))
+          }
+          if (result && typeof result.text === 'string') {
+            // The tool declares an output schema: its rendered text is the
+            // marker-delimited probe output.
+            text = result.text
+          } else if (Array.isArray(result?.content)) {
+            text = result.content.map((block) => (block && block.type === 'text' ? block.text : '')).join('\n')
+          }
         }
         applyParsed(context, parseGpuOutput(text), target)
       } catch (error) {

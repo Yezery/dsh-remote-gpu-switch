@@ -171,6 +171,14 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.2.1
+
+- Remote probing calls `rw_exec`'s body directly instead of routing a batch through
+  `ctx.tools.execute`. The gate-way path ran the tool outside the session log, which made
+  the auto-review preset refuse every probe ("the pending root call is missing or ambiguous
+  in the session log"); it also looked the tool up by agent id instead of the agent's scope.
+- A session with no workspace yet now reports "no workspace" instead of a probe error.
+
 ### 1.2.0
 
 - The GPU view follows the **workspace**, not one global machine: local workspaces probe

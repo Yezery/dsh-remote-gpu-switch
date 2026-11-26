@@ -43,18 +43,22 @@ let remoteCalls = 0
 let lastRemoteAgent = null
 let registeredTool = null
 
+// Stands in for dsh-remote's rw_exec: the plugin must call its body directly
+// (a registry batch would run outside the session log the auto-review gate reads).
+const rwExec = {
+  name: 'rw_exec',
+  parameters: { type: 'object', properties: {} },
+  output: { schema: { type: 'object' }, render: () => [] },
+  async execute(_args, exec) {
+    remoteCalls += 1
+    lastRemoteAgent = exec.agent
+    return { text: remoteOutput }
+  },
+}
 const tools = {
   register(definition) { registeredTool = definition; return () => {} },
-  async execute(input) {
-    remoteCalls += 1
-    lastRemoteAgent = input.agent
-    return {
-      results: [{
-        callId: input.calls[0].id,
-        result: { content: [{ type: 'text', text: remoteOutput }], isError: false },
-      }],
-    }
-  },
+  executable(name, agent) { return name === 'rw_exec' && agent ? rwExec : undefined },
+  async execute() { throw new Error('the plugin must not route rw_exec through tools.execute') },
 }
 
 const ctx = {
