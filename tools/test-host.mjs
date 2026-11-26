@@ -145,6 +145,15 @@ try {
   assert.equal(remote.idle.total, 2)
   assert.equal(remote.idle.count, 1)
 
+  // Paused keeps the last reading; sampling resumes once allowed again.
+  const pausedAgain = await query('s-remote', { sampling: '0' })
+  assert.equal(pausedAgain.gpus.length, 2, 'the last reading is still served while paused')
+  const resumed = await query('s-remote', { sampling: '1' })
+  assert.equal(resumed.sampling, true)
+  // The sample from a second ago still counts, so resuming may serve it as-is;
+  // what matters is that the switch itself changes and a stale sample refreshes.
+  assert.ok(resumed.gpus.length > 0)
+
   // Settings (no session): the last viewed machine, not an unrelated active host.
   const settings = await query('')
   assert.equal(settings.target.kind, 'remote')

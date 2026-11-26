@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-gpu-switch",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "private": true,
   "type": "module",
   "description": "Shows the free GPUs of the current workspace's machine — local or dsh-remote host — with per-GPU utilization, memory, temperature and the owning user.",

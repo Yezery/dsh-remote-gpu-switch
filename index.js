@@ -275,6 +275,8 @@ export function apply(ctx, config) {
   // The CPU fallback is the CLIENT's switch: `?cpu=1` is the settings-page draft
   // the user committed, so the host config only decides the default.
   let cpuWanted = settings.showCpu
+  // Master switch: the client's toggle pauses sampling for every machine.
+  let samplingWanted = true
 
   /** One sample holder per machine (`local`, `remote:user@host:port`) or the legacy active machine. */
   const contexts = new Map()
@@ -456,6 +458,12 @@ export function apply(ctx, config) {
     context.target = target
     context.inFlight = (async () => {
       try {
+        if (!samplingWanted) {
+          // Paused: keep the last reading, say why it is not moving.
+          context.error = null
+          context.hint = 'Sampling is paused from the settings page.'
+          return
+        }
         let text = ''
         let cpu = null
         if (target.kind === 'unknown') {
@@ -564,7 +572,7 @@ export function apply(ctx, config) {
         context.timer = null
         return
       }
-      if (context.target) void probe(context, context.target)
+      if (samplingWanted && context.target) void probe(context, context.target)
     }, settings.intervalMs)
     if (typeof context.timer.unref === 'function') context.timer.unref()
   }
@@ -597,6 +605,7 @@ export function apply(ctx, config) {
       updatedAt: context.updatedAt,
       requests: context.requests,
       intervalMs: settings.intervalMs,
+      sampling: samplingWanted,
       command: target && target.kind === 'local' ? settings.localCommand : settings.command,
       history: context.history.slice(-settings.historyLength),
     }
@@ -615,6 +624,12 @@ export function apply(ctx, config) {
     lastContext = context
     ensureTimer(context)
     const stale = context.updatedAt === 0 || now - context.updatedAt > settings.intervalMs
+    if (!samplingWanted) {
+      context.hint = context.updatedAt > 0
+        ? 'Sampling is paused from the settings page.'
+        : 'Sampling is paused from the settings page; turn it on to read this machine.'
+      return snapshot(context)
+    }
     if (stale) {
       const pending = probe(context, target)
       // The very first caller waits for the sample; later callers get the
@@ -636,6 +651,8 @@ export function apply(ctx, config) {
           const sessionId = (url.searchParams.get('sessionId') || '').trim()
           const cpuFlag = url.searchParams.get('cpu')
           if (cpuFlag === '1' || cpuFlag === '0') cpuWanted = cpuFlag === '1'
+          const samplingFlag = url.searchParams.get('sampling')
+          if (samplingFlag === '1' || samplingFlag === '0') samplingWanted = samplingFlag === '1'
           if (sessionId) {
             const target = resolveTarget(sessionId)
             body = await serve(contextFor(target.key), target)
@@ -699,6 +716,7 @@ export function apply(ctx, config) {
       render: (_args, value) => [{ type: 'text', text: value?.text ?? '' }],
     },
     async execute(_args, exec) {
+      if (!samplingWanted) return { text: 'GPU sampling is paused in the settings page; turn it on to read a machine.' }
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : ''
       const target = resolveTarget(sessionId)
       const context = contextFor(target.key)

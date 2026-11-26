@@ -189,6 +189,13 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.7
+
+- Settings → **显卡面板** gains a **sampling master switch**. Turning it off stops every
+  timer and every probe on the host, keeps the last reading on screen, and says so
+  (`GPU ⏸`, a paused panel). The agent tool answers "paused" instead of probing.
+  Stored in the browser like the CPU switch.
+
 ### 1.3.5
 
 - **Lighter by default**: cadence 3 s → 8 s → **15 s**, idle stop 2 min → 1 min → **30 s**,
