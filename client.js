@@ -636,6 +636,9 @@ window.__ModuleLoader__.load({
       return Number.isFinite(interval) && interval >= 1000 ? interval : fallback
     }
 
+    /** How stale a cached snapshot may be before a returning surface re-reads it. */
+    const FRESH_MS = 20000
+
     /**
      * Subscribe a component to its workspace's poller.
      * @param {string} sessionId - the workspace's session, or '' for settings.
@@ -659,9 +662,12 @@ window.__ModuleLoader__.load({
         const store = storeFor(key)
         setState(store.get())
         if (active === false || !pageVisible) return undefined
-        // A surface that was paused (hidden tab, closed pane) resumes with one
-        // immediate read instead of waiting a full cadence.
-        void store.refresh()
+        // A surface that comes back reads only when the cached sample went
+        // stale with age: re-opening the same pane within the fresh window
+        // costs one cached GET, not a probe.
+        const current = store.get().snapshot
+        const age = current && current.updatedAt ? Date.now() - current.updatedAt : Infinity
+        if (age > FRESH_MS) void store.refresh()
         return store.subscribe((snapshot, failure) => setState({ snapshot, failure }))
       }, [key, active, pageVisible])
       return { state, reload: () => storeFor(key).refresh() }

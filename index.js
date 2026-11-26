@@ -75,9 +75,9 @@ const DEFAULT_COMMAND = [
 ].join(' ')
 
 const DEFAULTS = {
-  intervalMs: 8000,
+  intervalMs: 15000,
   commandTimeoutMs: 15000,
-  idleStopMs: 60000,
+  idleStopMs: 30000,
   historyLength: 20,
   idleUtilPercent: 10,
   idleMemoryPercent: 5,
