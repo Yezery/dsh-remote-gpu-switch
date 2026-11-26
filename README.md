@@ -189,6 +189,11 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.8
+
+- Settings → 显卡面板 puts the switches **at the top**, drawn as switches (native checkbox
+  underneath, so keyboard and screen readers keep working) instead of checkboxes.
+
 ### 1.3.7
 
 - Settings → **显卡面板** gains a **sampling master switch**. Turning it off stops every

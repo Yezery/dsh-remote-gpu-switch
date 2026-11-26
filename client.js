@@ -1019,6 +1019,102 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * A switch: a native checkbox that keeps keyboard and a11y semantics, drawn
+     * as a track + knob so it matches the rest of the panel.
+     */
+    function Switch(props) {
+      const on = props.checked === true
+      return h(
+        'span',
+        {
+          style: {
+            position: 'relative',
+            display: 'inline-flex',
+            flex: 'none',
+            width: 34,
+            height: 20,
+          },
+        },
+        h('input', {
+          type: 'checkbox',
+          role: 'switch',
+          'aria-checked': on ? 'true' : 'false',
+          'aria-label': props.label,
+          checked: on,
+          disabled: props.disabled === true,
+          onChange: (event) => props.onChange(event.target.checked),
+          style: {
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            margin: 0,
+            opacity: 0,
+            cursor: props.disabled ? 'default' : 'pointer',
+            zIndex: 1,
+          },
+        }),
+        h('span', {
+          'aria-hidden': 'true',
+          style: {
+            position: 'absolute',
+            inset: 0,
+            borderRadius: 999,
+            background: on ? BRAND : 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,0.28))',
+            transition: 'background-color 160ms ease',
+            opacity: props.disabled ? 0.5 : 1,
+          },
+        }),
+        h('span', {
+          'aria-hidden': 'true',
+          style: {
+            position: 'absolute',
+            top: 2,
+            left: on ? 16 : 2,
+            width: 16,
+            height: 16,
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
+            transition: 'left 160ms ease',
+          },
+        }),
+      )
+    }
+
+    /** One labelled switch row for the settings page. */
+    function SwitchRow(props) {
+      return h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '8px 10px',
+            borderRadius: 8,
+            border: '1px solid var(--dsw-alias-border-l1)',
+            background: 'var(--dsw-alias-bg-layer-1)',
+          },
+        },
+        h(
+          'span',
+          { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
+          h('span', { style: { fontWeight: 600 } }, props.title),
+          props.hint
+            ? h('span', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11, lineHeight: 1.5 } }, props.hint)
+            : null,
+        ),
+        h('span', { style: { paddingTop: 1 } }, h(Switch, {
+          checked: props.checked,
+          label: props.title,
+          onChange: props.onChange,
+        })),
+      )
+    }
+
     /** The CPU / unified-memory card: what the GPU view cannot show, and why. */
     function CpuCard(props) {
       const cpu = props.cpu
@@ -1421,6 +1517,21 @@ window.__ModuleLoader__.load({
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 } },
         h('div', { style: { fontWeight: 600 } }, h(SettingsLabel, null)),
+        // Switches first: they are what a user comes here to change.
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+          h(SwitchRow, {
+            title: tr('sampling.show'),
+            hint: tr('sampling.hint'),
+            checked: draft.sampling !== false,
+            onChange: (value) => settingsDraft.setSampling(value),
+          }),
+          h(SwitchRow, {
+            title: tr('cpu.show'),
+            hint: tr('cpu.hint'),
+            checked: draft.showCpu === true,
+            onChange: (value) => settingsDraft.setShowCpu(value),
+          }),
+        ),
         row(tr('settings.status'), h('span', { style: { color: statusColor } }, statusText)),
         row(tr('settings.workspace'), snapshot && snapshot.target
           ? (snapshot.target.kind === 'local' ? tr('target.local') : tr('target.remote'))
@@ -1528,54 +1639,6 @@ window.__ModuleLoader__.load({
         snapshot && snapshot.backend === 'apple-silicon' && !snapshot.cpu
           ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('gpu.apple.hidden'))
           : null,
-        h(
-          'label',
-          {
-            style: {
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              padding: '6px 0',
-              cursor: 'pointer',
-            },
-          },
-          h('input', {
-            type: 'checkbox',
-            checked: draft.sampling !== false,
-            onChange: (event) => settingsDraft.setSampling(event.target.checked),
-            style: { marginTop: 2, flex: 'none' },
-          }),
-          h(
-            'span',
-            { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-            h('span', { style: { fontWeight: 600 } }, tr('sampling.show')),
-            h('span', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 } }, tr('sampling.hint')),
-          ),
-        ),
-        h(
-          'label',
-          {
-            style: {
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              padding: '6px 0',
-              cursor: 'pointer',
-            },
-          },
-          h('input', {
-            type: 'checkbox',
-            checked: draft.showCpu === true,
-            onChange: (event) => settingsDraft.setShowCpu(event.target.checked),
-            style: { marginTop: 2, flex: 'none' },
-          }),
-          h(
-            'span',
-            { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-            h('span', null, tr('cpu.show')),
-            h('span', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 } }, tr('cpu.hint')),
-          ),
-        ),
         h(
           'button',
           {
