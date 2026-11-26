@@ -56,6 +56,7 @@ window.__ModuleLoader__.load({
       'settings.status.idle': '等待探测',
       'settings.status.loading': '正在探测…',
       'cpu.show': '无 GPU 时也显示 CPU / 统一内存',
+      'gpu.apple.hidden': '本机没有独立显卡卡；开启下方「CPU / 统一内存」可查看 Apple 统一内存。',
       'cpu.hint': '默认关闭。开启后会读取 CPU 与统一内存（如 Apple MPS），显示在下方；GPU 仍然优先。',
       'cpu.title': 'CPU · 统一内存',
       'cpu.kind.unified': '统一内存：CPU 与 GPU 共用，可作为显存使用',
@@ -118,6 +119,7 @@ window.__ModuleLoader__.load({
       'settings.status.idle': 'Waiting for the first probe',
       'settings.status.loading': 'Probing…',
       'cpu.show': 'Also show CPU / unified memory when there is no GPU',
+      'gpu.apple.hidden': 'No discrete GPU card here; turn on "CPU / unified memory" to see Apple unified memory.',
       'cpu.hint': 'Off by default. When on, reads the CPU and its unified memory (e.g. Apple MPS) and shows it below; the GPU still comes first.',
       'cpu.title': 'CPU · unified memory',
       'cpu.kind.unified': 'Unified memory: shared by the CPU and the GPU, usable as VRAM',
@@ -1116,6 +1118,13 @@ window.__ModuleLoader__.load({
         }
         const cpuDevice = snapshot.cpu && snapshot.cpu.memoryKind === 'unified'
         if (!snapshot.gpus || snapshot.gpus.length === 0) {
+          // A Mac whose CPU view is off: the shell found no GPU card, which is
+          // not the same as "this machine has no GPU".
+          if (snapshot.backend === 'apple-silicon' && !snapshot.cpu) {
+            return h('div', {
+              style: { padding: 12, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' },
+            }, tr('gpu.apple.hidden'))
+          }
           // A unified-memory machine DID answer the GPU question; the CPU card
           // below says so in memory terms instead of "no GPU".
           if (cpuDevice) return h(CpuCard, { cpu: snapshot.cpu })
@@ -1248,6 +1257,8 @@ window.__ModuleLoader__.load({
       const counts = idleCounts(gpus)
       if (!snapshot) return null
       const pending = snapshot.status === 'loading' || snapshot.status === 'idle'
+      const hidden = !pending && snapshot.status === 'ok'
+        && counts.total === 0 && snapshot.backend === 'apple-silicon' && !snapshot.cpu
       const failed = !pending && snapshot.status !== 'ok'
       const noGpu = !failed && !pending && snapshot.local === true && counts.total === 0
       const tone = pending ? 'muted' : failed ? 'danger' : noGpu ? 'muted' : idleTone(counts)
@@ -1298,6 +1309,8 @@ window.__ModuleLoader__.load({
         h('span', { style: { fontVariantNumeric: 'tabular-nums' } },
           pending
             ? 'GPU …'
+            : hidden
+              ? 'GPU —'
             : failed
               ? 'GPU --'
             : noGpu
@@ -1448,6 +1461,9 @@ window.__ModuleLoader__.load({
         // would repeat it with a process/user list this view does not sample.
         snapshot && snapshot.cpu && snapshot.cpu.memoryKind !== 'none'
           ? h(CpuCard, { cpu: snapshot.cpu })
+          : null,
+        snapshot && snapshot.backend === 'apple-silicon' && !snapshot.cpu
+          ? h('div', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, tr('gpu.apple.hidden'))
           : null,
         h(
           'label',

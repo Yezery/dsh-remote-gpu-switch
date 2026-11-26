@@ -72,7 +72,7 @@ const cases = [
   ['gpustat', gpustat, 1],
   ['none', none, 0],
   ['broken', broken, 0],
-  ['apple', apple, 1],
+  ['apple', apple, 0],
 ]
 
 let failures = 0
@@ -95,19 +95,19 @@ if (noisyParsed.gpus.length !== 2) {
   console.log('ok   noisy: 2 gpus survived the trailing noise')
 }
 
+// A Mac without nvidia-smi is not an error, and it must not invent a GPU: the
+// unified-memory device comes only from the CPU section (lib/cpu-probe.js),
+// which runs only while the CPU view is on.
 const appleParsed = parseGpuOutput(apple)
-const appleGpu = appleParsed.gpus[0]
-const appleOk = appleParsed.error === null
-  && appleGpu?.name === 'Mac16,1 · Apple M4 (unified · MPS/Metal)'
-  && appleGpu.memoryTotal === 32768
-  && appleGpu.memoryUsed === 32768 - 9000
-  && appleGpu.processes.length === 2
-  && appleParsed.cpu?.memoryKind === 'unified'
+const appleOk = appleParsed.backend === 'apple-silicon'
+  && appleParsed.error === null
+  && appleParsed.gpus.length === 0
+  && appleParsed.cpu === null
 if (!appleOk) {
   failures += 1
-  console.log('FAIL apple row:', JSON.stringify(appleParsed))
+  console.log('FAIL apple backend:', JSON.stringify(appleParsed))
 } else {
-  console.log('ok   apple: unified device + 2 processes')
+  console.log('ok   apple: backend named, no device invented without the CPU view')
 }
 
 if (splitSections(nvidia).gpus.length !== 2) {

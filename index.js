@@ -64,21 +64,10 @@ const DEFAULT_COMMAND = [
     + ' rocm-smi --showuse --showmemuse --showtemp --json 2>/dev/null;',
   "elif command -v gpustat >/dev/null 2>&1; then echo gpustat; echo '==DSHGPU gpus==';"
     + ' gpustat --json 2>/dev/null;',
-  // Apple Silicon has no nvidia-smi: Apple's own unified-memory numbers stand in.
-  'elif [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo apple-silicon;'
-    + " echo '==DSHGPU gpus==';"
-    + ' printf \'%s,%s,%s,%s,%s,%s,%s,%s\\n\' "$(sysctl -n hw.model 2>/dev/null || echo Apple)"'
-    + ' apple-silicon'
-    + ' "$(vm_stat 2>/dev/null | awk \'/free|inactive/ {gsub(/\./,"",$3); f+=$3}'
-    + ' /Pages occupied by compressor/ {c+=$5}'
-    + ' END {printf "%d", (f+c)*16384/1048576}\')"'
-    + ' "$(sysctl -n hw.memsize 2>/dev/null | awk \'{printf "%d", $1/1048576}\')"'
-    + ' 1'
-    + ' "$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo cpu)"'
-    + ' "$(sysctl -n hw.ncpu 2>/dev/null || echo 0)"'
-    + ' macOS;'
-    + ' ps -Ao pcpu=,user=,comm= 2>/dev/null | sort -k1 -nr | head -12'
-    + ' | while read -r c u cmd; do echo "cpu,$c,$u,$(echo "$cmd" | tr \',\' \' \')"; done;',
+  // Apple Silicon has no nvidia-smi. The numbers come from the plugin's own CPU
+  // section (only while the CPU view is on), so this branch only names the
+  // backend; a process list here would put users on a view nobody asked for.
+  'elif [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo apple-silicon;',
   'else echo none; fi;',
   // ===DSHGPU cpu=== is printed by the plugin itself (lib/cpu-probe.js) when
   // the host has no usable GPU; a remote shell cannot know our settings.
@@ -416,6 +405,8 @@ export function apply(ctx, config) {
    */
   function applyParsed(context, parsed, target, cpu = null) {
     context.status = 'ok'
+    // An absent CPU section means the CPU view is off: never serve a reading
+    // from an earlier probe that had it on.
     context.cpu = cpu
     context.host = parsed.host
     context.backend = parsed.backend

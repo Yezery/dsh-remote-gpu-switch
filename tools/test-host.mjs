@@ -113,8 +113,11 @@ try {
   assert.equal(local.local, true)
   assert.equal(local.status, 'ok')
   if (local.gpus.length === 0) {
-    assert.ok(local.error === 'no-gpu-backend' || local.error === 'no-gpu-visible',
-      `expected a no-GPU reason, got ${local.error}`)
+    // Without a GPU card, either a backend explains it or (a Mac) the CPU view
+    // would have supplied the unified-memory device.
+    assert.ok(local.error === 'no-gpu-backend' || local.error === 'no-gpu-visible'
+      || local.backend === 'apple-silicon',
+    `expected a no-GPU reason, got ${local.error}`)
   }
   assert.equal(remoteCalls, 0, 'a local workspace must not call rw_exec')
   // The CPU fallback asked for: this Mac answers "unified memory", a Linux box
@@ -123,8 +126,12 @@ try {
   assert.ok(['unified', 'shared', 'integrated', 'none'].includes(local.cpu.memoryKind),
     `unexpected memory kind ${local.cpu.memoryKind}`)
 
-  // Without the flag the fallback costs nothing, even when a reading is cached.
-  assert.equal((await query('s-local', { cpu: '0' })).cpu, null)
+  // Without the flag the fallback costs nothing, even when a reading is cached:
+  // the host must not re-serve the CPU section from the probe before.
+  const offAgain = await query('s-local', { cpu: '0' })
+  assert.equal(offAgain.cpu, null)
+  assert.equal(offAgain.gpus.some((gpu) => gpu.name.includes('unified')), false,
+    'a CPU-off sample must not keep the unified-memory device')
 
   // REMOTE workspace: same display logic, but resolved through rw_exec as the
   // session's own agent so dsh-remote picks this workspace's host.

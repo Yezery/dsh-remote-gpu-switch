@@ -189,6 +189,15 @@ sh tools/check-command.sh      # probe command survives sh and bash
 
 ## Changelog
 
+### 1.3.4
+
+- A Mac no longer reports a unified-memory GPU with the CPU view **off**: the Darwin
+  branch of the shell only names the backend, so no device, no process list and no
+  "active users" appear unless the CPU view supplied it. The panel says where the
+  numbers live instead of claiming the machine has no GPU.
+- A probe without the CPU section clears the previous CPU reading, so a stale one is
+  never re-served after the switch is turned off.
+
 ### 1.3.3
 
 - The settings navigation row shows the plugin's own mark: the icon registers through
